@@ -163,7 +163,7 @@ class NVAveragerProgram(QickRegisterManagerMixin, AcquireProgram):
                 save_experiments: List = None, start_src: str = "internal",
                 progress=False, remove_offset=True):
         """
-        Method that exectues the qick program and accumulates data from the data buffer until the proram is complete
+        Method that executes the qick program and accumulates data from the data buffer until the proram is complete
         For NV measurements, the results are DC values and thus only have I values (rather than I and Q)
 
         Parameters

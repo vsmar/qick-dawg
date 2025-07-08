@@ -222,7 +222,7 @@ class NVConfiguration(ItemAttribute):
     def add_unitless_linear_sweep(self, name, start, stop, delta=0, nsweep_points=0):
 
         for var in [start, stop, delta]:
-            assert issubclass(var, int), "Unitless linear sweep requires integer start, stop, delta" 
+            assert isinstance(var, int), "Unitless linear sweep requires integer start, stop, delta" 
 
         start_name = name + '_start'
         end_name = name + '_end'
@@ -246,7 +246,7 @@ class NVConfiguration(ItemAttribute):
                 print(f'Requested {start} to {stop} in {nsweep_points}')
             else:
                 print(f'Requested {start} to {stop} by {delta}')
-            print(f'Instead using {start} to {self[end_name]} by {self[delta_name]} in {self.n_sweep_points}')
+            print(f'Instead using {start} to {self[end_name]} by {self[delta_name]} in {self.nsweep_points}')
 
     def add_exponential_sweep(self, name, unit, start, stop, scaling_factor=0):
         """
