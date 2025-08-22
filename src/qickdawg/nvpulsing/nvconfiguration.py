@@ -40,10 +40,10 @@ class NVConfiguration(ItemAttribute):
     Methods
     -------
     add_linear_sweep
-        method that generates all the attributes required for exectuing a linear sweep
+        method that generates all the attributes required for executing a linear sweep
 
     add_exponential_sweep
-        method that generates all the attributes required for exectuing a linear sweep
+        method that generates all the attributes required for executing an exponential sweep
     '''
 
     def __init__(self):

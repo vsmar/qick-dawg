@@ -6,9 +6,9 @@ RFTest Envelope class used to test the shape of RF envelopes.
 
 # Use a QickSweep, not sure which one to use
 from qick.averager_program import QickSweep
-from .nvqicksweep import NVQickSweep # NVQickSweep requires a readout_integration time parameter
+from ..nvpulsing.nvqicksweep import NVQickSweep # NVQickSweep requires a readout_integration time parameter
 
-from .nvaverageprogram import NVAveragerProgram
+from ..nvpulsing.nvaverageprogram import NVAveragerProgram
 from itemattribute import ItemAttribute
 from ..util import apply_on_axis_0_n_times
 

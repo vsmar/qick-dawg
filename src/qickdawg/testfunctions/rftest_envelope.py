@@ -1,13 +1,12 @@
 '''
-RFTest
+RFTest Envelope
 =======================================================================
-RF Test class used to program sequences to evaluate the RFSoC RF Power 
-and Rise times.
+RFTest Envelope class used to test the shape of RF envelopes.
 '''
 
 
 from qick.averager_program import QickSweep
-from .nvaverageprogram import NVAveragerProgram
+from ..nvpulsing.nvaverageprogram import NVAveragerProgram
 from itemattribute import ItemAttribute
 from ..util import apply_on_axis_0_n_times
 
@@ -17,16 +16,18 @@ import matplotlib.image as mpimg
 from math import floor
 import os 
 
-class RFTest(NVAveragerProgram):
+class RFTest_Envelope(NVAveragerProgram):
     '''
     An NVAveragerProgram class that generates RF gain and frequency stepping sequences.
     '''
     required_cfg = [
         "pulse_len_treg",
+        "pulse_sigma_treg", # sigma for gaussian pulse
         "laser_gate_pmod",
         "adc_channel", #not used
         "relax_delay_treg",
         "trigger_width_treg",
+        "mw_freg",
         "mw_channel",
         "mw_nqz",
         "gain_start",
@@ -37,9 +38,7 @@ class RFTest(NVAveragerProgram):
         "repitition"]
     
     def initialize(self):
-        # NVConfiguration class does not have Gain units unlike freq, time, or phase
-        # need to call: cfg.add_unitless_linear_sweep(gain, start, stop, delta, nsweep_points)
-        self.check_cfg() #?
+        self.check_cfg()
 
         if self.cfg.gain_start < 0:
             assert 0, 'Smallest Microwave gain must be postive'
@@ -51,12 +50,20 @@ class RFTest(NVAveragerProgram):
 
         self.setup_readout()
 
+        self.add_gauss(ch=self.cfg.mw_channel, 
+                       name='gaussian', 
+                       sigma=self.cfg.pulse_sigma_treg,
+                       length=self.cfg.pulse_len_treg, 
+                       even_length=True) # attempt to add gaussian pulse
+
         self.set_pulse_registers(
             ch=self.cfg.mw_channel,
-            style='const',
+            # style='flat_top',
+            style='arb', 
             freq=self.cfg.mw_freg,
             gain=self.cfg.gain_start,
-            length=self.cfg.pulse_len_treg, # pulse len
+            # length=self.cfg.pulse_len_treg, # pulse len (not used for arb)
+            waveform='gaussian',
             phase=0)
 
         self.mw_gain_register = self.get_gen_reg(self.cfg.mw_channel, "gain")
@@ -77,7 +84,8 @@ class RFTest(NVAveragerProgram):
     def body(self):
         # Pulse MW channel
         for rep in range(self.cfg.repitition):
-            self.pulse(ch=self.cfg.mw_channel, t=rep*self.cfg.pulse_len_treg)
+            self.pulse(ch=self.cfg.mw_channel, 
+                       t=self.cfg.trigger_width_treg + self.cfg.relax_delay_treg + rep*self.cfg.pulse_len_treg)
         
         self.trigger(
                     pins=[self.cfg.laser_gate_pmod],

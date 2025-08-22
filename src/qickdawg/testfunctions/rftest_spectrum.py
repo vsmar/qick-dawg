@@ -6,7 +6,7 @@ RFTest Spectrum class used to program continuous RF output to evaluate the RFSoC
 
 
 from qick.averager_program import QickSweep
-from .nvaverageprogram import NVAveragerProgram
+from ..nvpulsing.nvaverageprogram import NVAveragerProgram
 from itemattribute import ItemAttribute
 from ..util import apply_on_axis_0_n_times
 
