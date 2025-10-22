@@ -78,27 +78,17 @@ class RFTest_CPMG(NVAveragerProgram):
         self.half_pi_len_unused = self.half_pi_waveform_len_treg*16 - self.cfg.pi_len_samples//2
 
         # Set up registers for storing tau treg and sample offsets
-        self.tau_step = self.new_gen_reg(self.cfg.mw_channel,
+        self.tau_samples = self.new_gen_reg(self.cfg.mw_channel,
                                             name='tau_step',
                                             init_val=self.cfg.tau_len_samples - self.pi_len_unused)
         
         # we can initialize sample_offset to already account for the first half_pi_pulse
         self.sample_offset = self.new_gen_reg(self.cfg.mw_channel,
                                                     name='sample_offset',
-                                                    init_val=(self.pi_len_unused-self.half_pi_len_unused)%16)
+                                                    init_val=(self.pi_len_unused-self.half_pi_len_unused))
         self.treg_offset = self.new_gen_reg(self.cfg.mw_channel,
                                                 name='treg_offset',
                                                 init_val=0)
-        
-        # This is by default tau_len_samples // 16
-        # And +1 when tau_sample_offset overflows
-        self.treg_step = self.new_gen_reg(self.cfg.mw_channel,
-                                                name='treg_step',
-                                                init_val=self.cfg.tau_len_samples // 16)
-
-        self.sample_step = self.new_gen_reg(self.cfg.mw_channel,
-                                                name='sample_step',
-                                                init_val=self.cfg.tau_len_samples % 16)
         
         # CPMG loop register
         self.n_cpmg_register = self.new_gen_reg(self.cfg.mw_channel,
@@ -121,11 +111,15 @@ class RFTest_CPMG(NVAveragerProgram):
         # CPMG waveform
         self.synci(200)  # give processor some time to configure pulses
 
+
+
     def body(self):
         self.sync_all()
 
         # Half pi pulse, 0 sample offset, phase = x
+        self.offset_computations()
         self.pulse(ch=self.cfg.mw_channel)
+        self.sync(self.treg_offset.page, self.treg_offset.addr)
 
         # Loop pi-X, tau, pi-Y, tau
         self.n_cpmg_register.reset()
@@ -134,13 +128,19 @@ class RFTest_CPMG(NVAveragerProgram):
         # X pulse
         # Configures assembly code for picking the waveform
         self.set_waveform("Execute_X_Pi_Pulse", "pi_", phase=0)
-        self.sync(self.treg_offset.page, self.treg_offset.addr) # See below about placement
+        self.offset_computations()
         self.pulse(ch=self.cfg.mw_channel)
+        self.sync(self.treg_offset.page, self.treg_offset.addr)
 
         # Y pulse
         self.set_waveform("Execute_Y_Pi_Pulse", "pi_", phase=1)
-        self.sync(self.treg_offset.page, self.treg_offset.addr) # I need to move syncs after pulses for correct timing behavior (to do this I need to modify my computing instructions)
+        self.offset_computations()
         self.pulse(ch=self.cfg.mw_channel)
+        self.synci(22)
+        self.sync(self.treg_offset.page, self.treg_offset.addr)
+
+
+        self.mathi(self.sample_offset.page, self.sample_offset.addr, self.sample_offset.addr, "&", 15) #adding an additional stall
 
         self.loopnz(
                 self.n_cpmg_register.page,
@@ -149,7 +149,6 @@ class RFTest_CPMG(NVAveragerProgram):
         
         # Pi/2 X pulse
         self.set_waveform("Execute_Last_Pulse", "half_pi_")
-        self.sync(self.treg_offset.page, self.treg_offset.addr) # See above about placement
         self.pulse(ch=self.cfg.mw_channel)
         self.sync_all()
 
@@ -162,7 +161,6 @@ class RFTest_CPMG(NVAveragerProgram):
         """
         Configures the assembly code necessary for setting the waveform
         """
-        self.offset_computations()
         self.select_waveform(4, 8, 16, label, pulse_type, phase)
         self.label(label)
     
@@ -171,11 +169,9 @@ class RFTest_CPMG(NVAveragerProgram):
         Compute the sample_offset and treg_offset for the next pulse
         """
         # sample_offset = sample_offset + sample_step
-        self.math(self.sample_offset.page, self.sample_offset.addr, self.sample_offset.addr, "+", self.sample_step.addr)
-        # treg_offset = sample_offset >> 4
+        self.math(self.sample_offset.page, self.sample_offset.addr, self.sample_offset.addr, "+", self.tau_samples.addr)
+        # treg_offset = sample_offset >> 4 (global offset)
         self.mathi(self.sample_offset.page, self.treg_offset.addr, self.sample_offset.addr, ">>", 4)
-        # treg_offset = treg_offset + treg_step
-        self.math(self.treg_offset.page, self.treg_offset.addr, self.treg_offset.addr, "+", self.treg_step.addr)
         # sample_offset = sample_offset & 15
         self.mathi(self.sample_offset.page, self.sample_offset.addr, self.sample_offset.addr, "&", 15)
 
