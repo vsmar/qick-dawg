@@ -114,35 +114,36 @@ class RFTest_CPMG(NVAveragerProgram):
 
 
     def body(self):
+
+        # If sweeping Tau then perform the computation:
+        # samples_to_next_pulse = Actual Tau (samples) - Pi Pulse Waveform unused (samples)
+        
         self.sync_all()
 
         # Half pi pulse, 0 sample offset, phase = x
         self.offset_computations()
         self.pulse(ch=self.cfg.mw_channel)
-        self.sync(self.treg_offset.page, self.treg_offset.addr)
+        self.sync_all(self.treg_offset.page, self.treg_offset.addr)
 
         # Loop pi-X, tau, pi-Y, tau
         self.n_cpmg_register.reset()
-        self.label("LOOP_ncpmg")
+        self.label("LOOP_ncpmg") # loop back to here
         
         # X pulse
         # Configures assembly code for picking the waveform
-        self.set_waveform("Execute_X_Pi_Pulse", "pi_", phase=0)
-        self.offset_computations()
-        self.pulse(ch=self.cfg.mw_channel)
-        self.sync(self.treg_offset.page, self.treg_offset.addr)
+        self.set_waveform("Execute_X_Pi_Pulse", "pi_", phase=0) # Select next pulse's waveform
+        self.offset_computations() # compute timing for the pulse following this one
+        self.pulse(ch=self.cfg.mw_channel) # execute pulse
+        self.sync_all(self.treg_offset.page, self.treg_offset.addr) 
 
         # Y pulse
-        self.set_waveform("Execute_Y_Pi_Pulse", "pi_", phase=1)
-        self.offset_computations()
-        self.pulse(ch=self.cfg.mw_channel)
-        self.synci(22)
-        self.sync(self.treg_offset.page, self.treg_offset.addr)
-
-
-        self.mathi(self.sample_offset.page, self.sample_offset.addr, self.sample_offset.addr, "&", 15) #adding an additional stall
-
-        self.loopnz(
+        self.set_waveform("Execute_Y_Pi_Pulse", "pi_", phase=90) # Select next pulse's waveform
+        self.offset_computations() # compute timing for the pulse following this one
+        self.pulse(ch=self.cfg.mw_channel) # execute pulse
+        # Using sync here, causes timing mismatch (tproc jumps ahead when taking loopnz)
+        self.sync_all(self.treg_offset.page, self.treg_offset.addr) 
+        
+        self.loopnz( # loop if some cpmg pulses not yet executed 
                 self.n_cpmg_register.page,
                 self.n_cpmg_register.addr,
                 'LOOP_ncpmg')
@@ -161,18 +162,33 @@ class RFTest_CPMG(NVAveragerProgram):
         """
         Configures the assembly code necessary for setting the waveform
         """
-        self.select_waveform(4, 8, 16, label, pulse_type, phase)
-        self.label(label)
+        self.select_waveform(4, 8, 16, label, pulse_type, phase) # Enter binary search tree
+        self.label(label) # label to branch back to after selecting waveform
     
     def offset_computations(self):
         """
-        Compute the sample_offset and treg_offset for the next pulse
+        Compute the sample_offset and treg_offset for the next pulse. 
+        Computes: 
+        1. wait till the start of the next pulse (from the end of the previous waveform) (in sample timing resolution 200ps)
+        2. Amount of wait done on the FPGA (converting to treg, ie dividing by 16 and taking the floor)
+        3. Amount of wait done in waveform (samples),   equal to: (previous offset + the step in samples) % 16
+
+        Tau_samples is a misnomer, instead it is:
+            Actual Tau (samples) - Pi Pulse Waveform unused (samples)
+            $$$ This is done to account for the delay in the pi pulse waveform itself
         """
         # sample_offset = sample_offset + sample_step
+        # Computes the total delay needed until the next pulse from the end of this waveform
+        # by adding amount of samples to wait + current sample offset
         self.math(self.sample_offset.page, self.sample_offset.addr, self.sample_offset.addr, "+", self.tau_samples.addr)
         # treg_offset = sample_offset >> 4 (global offset)
+        # Computes how long to stall the FPGA output in tproc cycles
+        # from the total delay.
+        # This operation also converts from samples (200ps) to treg (3.2ns)
         self.mathi(self.sample_offset.page, self.treg_offset.addr, self.sample_offset.addr, ">>", 4)
         # sample_offset = sample_offset & 15
+        # Computes the remaining samples that the pulse should be delayed by
+        # This is equivalent to: total delay (in samples) - fpga delay (in samples)
         self.mathi(self.sample_offset.page, self.sample_offset.addr, self.sample_offset.addr, "&", 15)
 
     def select_waveform(self, depth, center, span, label, pulse_type="pi_", phase=0):
@@ -180,11 +196,19 @@ class RFTest_CPMG(NVAveragerProgram):
         A binary search tree to select the correct waveform for a given sample_offset
         """
         center = int(center)
-        if (depth==0):
+        if (depth==0): # once at the lowest level of the binary tree (only one matches all conditions)
+            # Set pulse register (exact waveform & phase)
+            # Optionally phase could be selected for elsewhere (either via NCO, or setting up 2 waveforms)
             self.set_pulse_registers(ch=self.cfg.mw_channel, waveform=f"{pulse_type}{center}", phase=self.deg2reg(phase))
+            # Branch to exit binary tree and rejoin sequence
             self.condj(self.sample_offset.page, self.sample_offset.addr, "==", self.sample_offset.addr, label)
             return
-
+        
+        # QICK's only branch instruction is a conditional branch where you compare two registers
+        # Only 16 registers per page, and only same page registers can be compared
+        # We set the comparison register to an immediate (preset integer value)
+        # based on what condition we want to evaluate 
+        # Example: to do an if(sample_offset>=4), we would write in 4
         self.regwi(self.comparison.page, self.comparison.addr, center)
         self.condj(
                 self.sample_offset.page,
@@ -193,7 +217,10 @@ class RFTest_CPMG(NVAveragerProgram):
                 self.comparison.addr,
                 f"{pulse_type}{phase}_pulse_offset_{center}")
         
+        # Recurse for the case where condition is not met
         self.select_waveform(depth-1, center-span/4, span/2, label, pulse_type, phase)
 
-        self.label(f"{pulse_type}{phase}_pulse_offset_{center}")
+        # if conditional branch taken:
+        self.label(f"{pulse_type}{phase}_pulse_offset_{center}") # Go here
+        # Recurse for the case where condition is met
         self.select_waveform(depth-1, center+span/4, span/2, label, pulse_type, phase)
