@@ -18,6 +18,9 @@ import matplotlib.image as mpimg
 from math import floor
 import os 
 
+# To follow timing conventions, I've decided to start using
+# _tdds to refer to a samples timing resolution in a waveform/dds
+
 class RFTest_CPMG(NVAveragerProgram):
     '''
     An NVAveragerProgram class that generates RF gain and frequency stepping sequences.
@@ -76,13 +79,9 @@ class RFTest_CPMG(NVAveragerProgram):
         # Compute how much delay is in the waveforms
         self.pi_len_unused = self.pi_waveform_len_treg*16 - self.cfg.pi_len_samples
         self.half_pi_len_unused = self.half_pi_waveform_len_treg*16 - self.cfg.pi_len_samples//2
-
-        # Set up registers for storing tau treg and sample offsets
-        self.tau_samples = self.new_gen_reg(self.cfg.mw_channel,
-                                            name='tau_step',
-                                            init_val=self.cfg.tau_len_samples - self.pi_len_unused)
         
         # we can initialize sample_offset to already account for the first half_pi_pulse
+        # This is just accounting for the difference in unused time for a half pi vs a pi pulse
         self.sample_offset = self.new_gen_reg(self.cfg.mw_channel,
                                                     name='sample_offset',
                                                     init_val=(self.pi_len_unused-self.half_pi_len_unused))
@@ -108,16 +107,30 @@ class RFTest_CPMG(NVAveragerProgram):
         # Set first half pi x
         self.set_pulse_registers(ch=self.cfg.mw_channel, waveform="half_pi_0", phase=0)
 
-        # CPMG waveform
-        self.synci(200)  # give processor some time to configure pulses
+
+        # Add a sweep for Tau (samples, ie 200ps)
+        # this should be configured as unitless for now
+        self.tau_samples = self.get_gen_reg(self.cfg.mw_channel, "tau_step")
+        self.add_sweep(QickSweep(self,
+                          self.tau_samples,
+                          self.cfg.tau_start_samples - self.pi_len_unused,
+                          self.cfg.tau_end_samples - self.pi_len_unused,
+                          self.cfg.nsweep_points))
+        
+        # Set up registers for storing tau treg and sample offsets
+        self.tau_samples = self.new_gen_reg(self.cfg.mw_channel,
+                                            name='tau_step',
+                                            init_val=self.cfg.tau_len_samples - self.pi_len_unused)
+
+        # give processor some time to configure pulses
+        self.synci(200)  
 
 
 
     def body(self):
-
         # If sweeping Tau then perform the computation:
         # samples_to_next_pulse = Actual Tau (samples) - Pi Pulse Waveform unused (samples)
-        
+
         self.sync_all()
 
         # Half pi pulse, 0 sample offset, phase = x
