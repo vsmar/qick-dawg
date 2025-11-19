@@ -21,7 +21,7 @@ import os
 # To follow timing conventions, I've decided to start using
 # _tdds to refer to a samples timing resolution in a waveform/dds
 
-class SUBNANO_CPMG(NVAveragerProgram):
+class SUBNANO_RABI(NVAveragerProgram):
     '''
     An NVAveragerProgram class that generates RF gain and frequency stepping sequences.
     '''
@@ -66,11 +66,11 @@ class SUBNANO_CPMG(NVAveragerProgram):
         # Readout for QICK-DAWG
         self.setup_readout()
 
-        # Waveforms must have at least a length of 3 treg
-        self.pi_waveform_len_treg = \
-            max(int(np.ceil((self.cfg.pi2_len_samples*2 + (self.samps_per_clk-1)) / self.samps_per_clk)), 3)
-        self.half_pi_waveform_len_treg = \
-            max(int(np.ceil((self.cfg.pi2_len_samples + (self.samps_per_clk-1)) / self.samps_per_clk)), 3)
+        # Split waveform memory into 16 waveforms
+        self.waveform_len_treg =  2**12 / self.samps_per_clk
+
+        # alternatively use flat top (uses very little waveform, but minimum 3 treg pulses), look into this some more.
+        # 
         
         # Generate waveforms with each offset
         for i in range(self.samps_per_clk):
@@ -125,6 +125,8 @@ class SUBNANO_CPMG(NVAveragerProgram):
         # pulse phase register (NCO phase)
         self.phase_register = self.get_gen_reg(self.cfg.mw_channel, name='phase')
 
+        self.phase_register = self.get_gen_reg(self.cfg.mw_channel, name='')
+
         # Setup register to store the pi-pulse phase sequence
         self.phase_to_list()
 
@@ -143,9 +145,8 @@ class SUBNANO_CPMG(NVAveragerProgram):
         # flipping is usually not necesasary due to symmetry
         """
         self.phase_list = ["X", "Y", "X", "Y", "Y", "X", "Y", "X"]
-        phase_seq = int(''.join(['0' if val == 'X' else '1' for val in np.flip(self.phase_list)]), 2)
-        print(str(bin(phase_seq)))
-        self.phase_seq_register = self.new_gen_reg(self.cfg.mw_channel, "phase_seq_register", init_val=phase_seq)
+        phase_map = int(''.join(['0' if val == 'X' else '1' for val in np.flip(self.phase_list)]), 2)
+        self.phase_seq_register = self.new_gen_reg(self.cfg.mw_channel, "phase_seq_register", init_val=phase_map)
 
     def body(self):
         """
@@ -156,6 +157,7 @@ class SUBNANO_CPMG(NVAveragerProgram):
                       self.tdds_offset_register.addr, "-", self.tau_samples.addr)
         self.mathi(self.tdds_offset_register.page, self.tdds_offset_register.addr, 
                       self.tdds_offset_register.addr, "+", self.pi_len_unused)
+        print(self.pi_len_unused)
         self.sync_all()
 
         # Pi/2 X pulse
@@ -190,8 +192,6 @@ class SUBNANO_CPMG(NVAveragerProgram):
         self.set_pulse_registers(ch=self.cfg.mw_channel, waveform="half_pi_0", phase=0)
         self.tdds_offset_register.reset() # reset to initial value 
 
-        self.synci(20000)
-
     def set_waveform(self, pi_pulse=True, phase=None):
         """
         Configures the assembly code necessary for setting the waveform
@@ -203,6 +203,7 @@ class SUBNANO_CPMG(NVAveragerProgram):
         # Waveform Selection & Offsets
         # ----------------------------
         # Compute offset
+        print(pi_pulse)
         self.offset_computations(double_tau=pi_pulse)
         self.sync(self.treg_offset_register.page, self.treg_offset_register.addr) 
 
@@ -231,7 +232,7 @@ class SUBNANO_CPMG(NVAveragerProgram):
             # Get which pulse this maps to in the phase sequence
             # n_cpmg_register % len(phase_list) = n_cpmg_register && (len(phase_list)-1)
             self.bitwi(self.phase_register.page, self.phase_register.addr, 
-                   self.n_cpmg_register.addr, "&", int(np.log2(len(self.phase_list)-1)))
+                   self.n_cpmg_register.addr, "&", (len(self.phase_list)-1))
             
             # Isolate the phase in the phase sequence
             # phase_register = phase_seq_register >> (n_cpmg_register % sequence length)
@@ -241,7 +242,7 @@ class SUBNANO_CPMG(NVAveragerProgram):
             self.bitwi(self.phase_register.page, self.phase_register.addr, self.phase_register.addr, "&", 1)
 
             # multiply result with 90
-            self.phase_register.set_to(self.phase_register, '*', 90, physical_unit=True)
+            self.phase_register.set_to(self.phase_register, '*', 180, physical_unit=True)
 
         # TODO: Check if length needs to be declared if not using set_pulse_registers
         # This might make shorter delays possible
