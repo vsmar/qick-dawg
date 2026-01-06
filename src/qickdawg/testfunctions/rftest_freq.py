@@ -23,7 +23,7 @@ class RFTestFreq(NVAveragerProgram):
     '''
     required_cfg = [
         "pulse_len_treg",
-        "laser_gate_pmod",
+        "trigger_gate_pmod",
         "adc_channel", #not used
         "relax_delay_treg",
         "trigger_width_treg",
@@ -32,7 +32,6 @@ class RFTestFreq(NVAveragerProgram):
         "gain_start",
         "gain_end",
         "nsweep_points",
-        "pre_init",
         "n_repetitions"]
     
     def initialize(self):
@@ -45,8 +44,6 @@ class RFTestFreq(NVAveragerProgram):
 
         # Get mw registers
         self.declare_gen(ch=self.cfg.mw_channel, nqz=self.cfg.mw_nqz)
-
-        self.setup_readout()
 
         self.set_pulse_registers(
             ch=self.cfg.mw_channel,
@@ -81,7 +78,7 @@ class RFTestFreq(NVAveragerProgram):
         self.n_reps_register.reset()
 
         self.trigger(
-            pins=[self.cfg.laser_gate_pmod],
+            pins=[self.cfg.trigger_gate_pmod],
             width=self.cfg.trigger_width_treg,
             t=0)
 

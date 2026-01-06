@@ -50,6 +50,9 @@ class SUBNANO_CPMG(NVAveragerProgram):
         Sets up the waveforms, registers and sweeps, for pi and pi/2 pulses, and delays. 
         Also sets up the pulse phase sequence used. Currently only implemented with 2 phases, could be expanded.
         """
+        # ---------------------
+        # General Config
+        # ---------------------
         self.check_cfg()
 
         if self.cfg.mw_gain < 0:
@@ -66,6 +69,9 @@ class SUBNANO_CPMG(NVAveragerProgram):
         # Readout for QICK-DAWG
         self.setup_readout()
 
+        # ---------------------
+        # Waveform Set-up
+        # ---------------------
         # Waveforms must have at least a length of 3 treg
         self.pi_waveform_len_treg = \
             max(int(np.ceil((self.cfg.pi2_len_samples*2 + (self.samps_per_clk-1)) / self.samps_per_clk)), 3)
@@ -220,31 +226,21 @@ class SUBNANO_CPMG(NVAveragerProgram):
             # Set the phase to the predetermined value
             self.phase_register.set_to(phase, physical_unit=True)
         else:
-            # Use n_cpmg_register to determine what the phase should be
-            # We encode the possible phases into an immediate (in the instruction)
-
-            # Idea:
-            # For the current pi pulse extract from the phase_seq_register
-
-            # Current pi pulse (from end) = n_cpmg_register
-
-            # Get which pulse this maps to in the phase sequence
-            # n_cpmg_register % len(phase_list) = n_cpmg_register && (len(phase_list)-1)
+            # Determine the index of the current pulse
+            # = n_cpmg_register % len(phase_list)
             self.bitwi(self.phase_register.page, self.phase_register.addr, 
-                   self.n_cpmg_register.addr, "&", int(np.log2(len(self.phase_list)-1)))
-            
-            # Isolate the phase in the phase sequence
+                   self.n_cpmg_register.addr, "&", int(len(self.phase_list)-1))
+
+            # Isolate the pulse type from the phase sequence
             # phase_register = phase_seq_register >> (n_cpmg_register % sequence length)
             self.bitw(self.phase_register.page, self.phase_register.addr,
                        self.phase_seq_register.addr, '>>', self.phase_register.addr)
-            # Mask the last (LSB / 1s) place
+            # Mask the LSB
             self.bitwi(self.phase_register.page, self.phase_register.addr, self.phase_register.addr, "&", 1)
-
-            # multiply result with 90
-            self.phase_register.set_to(self.phase_register, '*', 90, physical_unit=True)
-
-        # TODO: Check if length needs to be declared if not using set_pulse_registers
-        # This might make shorter delays possible
+            
+            # Decode into the phase value
+            # Multiplying values > 16 bits  fails, so instead left bit shift by 30
+            self.bitwi(self.phase_register.page, self.phase_register.addr, self.phase_register.addr, "<<", 30)
 
     def offset_computations(self, double_tau=False):
         """
