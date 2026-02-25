@@ -11,7 +11,7 @@ from ..util import apply_on_axis_0_n_times
 class IntegratedReadoutWindow(NVAveragerProgram):
     '''
     An NVAveragerProgram class that generates and executes a sequence used
-    to determine the pi (pi/2) pulse lenghts for your experimetanl configuration
+    to determine the pi (pi/2) pulse lenghts for your experimental configuration
 
     Parameters
     -------------------------------------------------------------------
@@ -127,7 +127,7 @@ class IntegratedReadoutWindow(NVAveragerProgram):
         '''
         Method that generates the assembly code that is looped over or repeated. 
         For RabiSweep this peforms four measurements at a time and does two pulse sequences:
-        1. Microwave pulse followed by readout and reference emasurement
+        1. Microwave pulse followed by readout and reference measurement
         2. No micrwave pulse followed by readout and reference 
         '''
 
@@ -196,7 +196,7 @@ class IntegratedReadoutWindow(NVAveragerProgram):
             If None, this plots the squence with configuration labels
             If a `.NVConfiguration` object is supplied, the configuraiton value are added to the plot
         '''
-        graphics_folder = os.path.join(os.path.dirname(__file__), '../../graphics')
+        graphics_folder = os.path.join(os.path.dirname(__file__), 'graphics')
         image_path = os.path.join(graphics_folder, 'RABI.png')
 
         if cfg is None:

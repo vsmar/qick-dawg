@@ -21,7 +21,7 @@ import os
 # To follow timing conventions, I've decided to start using
 # _tdds to refer to a samples timing resolution in a waveform/dds
 
-class SUBNANO_CPMG(NVAveragerProgram):
+class SubnanoCPMGXY(NVAveragerProgram):
     '''
     An NVAveragerProgram class that generates RF gain and frequency stepping sequences.
     '''

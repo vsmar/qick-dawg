@@ -154,7 +154,7 @@ class RabiSweep(NVAveragerProgram):
         Method that generates the assembly code that is looped over or repeated. 
         For RabiSweep this peforms four measurements at a time and does two pulse sequences:
         1. Microwave pulse followed by readout and reference emasurement
-        2. No micrwave pulse followed by readout and reference 
+        2. No microwave pulse followed by readout and reference 
         '''
 
         self.pulse(ch=self.cfg.mw_channel, t=0)

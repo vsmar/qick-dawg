@@ -223,6 +223,8 @@ class LockinODMR(NVAveragerProgram):
         if self.cfg.edge_counting is False:
             data = data / self.cfg.readout_integration_treg
 
+        print(data.shape)
+
         signal = data[..., 0]
         reference = data[..., 1]
 

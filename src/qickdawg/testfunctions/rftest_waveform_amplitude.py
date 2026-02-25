@@ -87,7 +87,7 @@ class RFTest_Amplitude(NVAveragerProgram):
         self.set_pulse_registers(ch=self.cfg.mw_channel,
                                      style='const',
                                      freq=self.cfg.mw_freg,
-                                     length=self.cfg.waveform_len_samples // ,
+                                     length=self.cfg.waveform_len_samples,
                                      gain=self.cfg.mw_gain)
         
         self.sync(self.tau.page, self.tau.addr)
