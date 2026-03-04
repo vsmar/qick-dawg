@@ -121,7 +121,7 @@ class PODMR(NVAveragerProgram):
 
 
         IMPORTANT: This means that readout_reference_start_treg > laser_readout_offset_treg + readout_integration_treg, 
-        which is kind of stupid to put on the user if we expect them to optimize the laser on duration
+        which is risky to put on the user if we expect them to optimize the laser on duration
 
         Good rule of thumb put it maybe 0.5-1 us after
 
@@ -132,7 +132,7 @@ class PODMR(NVAveragerProgram):
 
         # pi
         self.pulse(ch=self.cfg.mw_channel, t=0)
-        self.synci(self.cfg.mw_pi_treg)
+        self.synci(self.cfg.mw_pi_treg) # if laser on time is longer than MW time this might not be necessary
         self.synci(self.cfg.mw_laser_delay_treg)
         # laser on
         self.ttl_readout()
