@@ -1,5 +1,5 @@
 from .util import *
 from .nvpulsing import *
 from .fitfunctions import *
-from .testfunctions import *
+from .rftests import *
 from .nvtestsuite import *
