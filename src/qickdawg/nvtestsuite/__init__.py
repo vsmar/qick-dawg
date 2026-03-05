@@ -1,4 +1,4 @@
 
 from ..nvpulsing import *
 
-from .podmr import PODMR
+from .pulsed_odmr import PODMR
