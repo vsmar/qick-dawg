@@ -44,12 +44,12 @@ class SUBNANO_RABI(NVAveragerProgram):
         # Laser params
         "laser_gate_pmod",
         "laser_on_treg",
-        "readout_reference_start_treg",
 
-        # delays
-        "mw_laser_delay_treg", # MW typically triggers sooner than laser
-        "laser_readout_offset_tus",
-        "relax_delay_treg"
+        # # delays
+        # "mw_laser_delay_treg", # MW typically triggers sooner than laser
+        # "laser_readout_offset_tus",
+        # "readout_reference_start_treg", # second readout reference (if using default ttl_readout())
+        # "relax_delay_treg"
         ]
 
     
@@ -78,17 +78,15 @@ class SUBNANO_RABI(NVAveragerProgram):
         # Get samples per clock (16 with current version of QICK-DAWG)
         self.samps_per_clk = self.soccfg['gens'][self.cfg.mw_channel]['samps_per_clk']
         self.tuning_num = int(np.log2(self.samps_per_clk)) # need a better way to describe the relationship of 4 to 16 in the context of resolving all options in binary
-        self.wvfm_length_treg = 16
+        self.wvfm_length_treg = 3
 
 
         # Generate (fine-stepping) waveform memories                 
         for i in range(1, self.samps_per_clk+1):
             waveform = np.zeros(self.wvfm_length_treg * self.samps_per_clk)
-            waveform[-i*10:] = 1
+            waveform[-i:] = 1
             waveform *= self.soccfg.get_maxv(self.cfg.mw_channel)
             self.add_envelope(ch=self.cfg.mw_channel, name=f"fine_adjustment_{i}", idata=waveform, qdata=waveform)
-
-        # TODO: resolve discrepancy with 200 ps pulse start 
 
         # Coarse duration register
         self.coarse_pulse_duration = self.new_gen_reg(self.cfg.mw_channel,
@@ -126,13 +124,14 @@ class SUBNANO_RABI(NVAveragerProgram):
                     t=0                     # start immediately
                     )
 
+
         # TODO: Add delay between initialization - 
         # if mw_laser_delay is > 0:
         # play laser pulse and make sure it ends, mw_laser_delay before playing RF pulse
-        if self.cfg.mw_laser_delay_treg > 0:
-            # play laser init pulse
-            self.synci(self.cfg.mw_laser_delay_treg) # this should wait for x duration after pulse is done (syn_all needed?)
-            self.sync_all() # needed?
+        # if self.cfg.mw_laser_delay_treg > 0:
+        #     # play laser init pulse
+        #     self.synci(self.cfg.mw_laser_delay_treg) # this should wait for x duration after pulse is done (syn_all needed?)
+        #     self.sync_all() # needed?
 
 
         # COMPUTE RF PULSE TIMING:
@@ -157,6 +156,7 @@ class SUBNANO_RABI(NVAveragerProgram):
 
 
         self.sync_all()
+        self.synci(100)
 
         # Add delay before readout for signal to settle
         # might want to make this command timing based on the delay necessary.
@@ -164,7 +164,29 @@ class SUBNANO_RABI(NVAveragerProgram):
         # READOUT - Turn on laser for detection
         # self.set_readout_registers(ch=self.cfg.laser_gate_pmod, length=self.cfg.laser_on_treg, freq=0, gain=32767)
         # self.pulse(ch=self.cfg.laser_gate_pmod)
-    
-        
+
         # Perform the actual readout acquisition
-        # self.ttl_readout()
+#         self.ttl_readout()
+
+# # or
+
+#         # aom only for offset between aom and laser on at t=0
+#         self.trigger_no_off(
+#             pins=[self.cfg.laser_gate_pmod],
+#             adc_trig_offset=0,
+#             t=0)
+
+#         # measure and laser trigger at laser_readout_offset
+#         self.trigger_no_off(
+#             adcs=self.cfg.adcs,
+#             pins=[self.cfg.laser_gate_pmod],
+#             adc_trig_offset=0,
+#             t=self.cfg.laser_readout_offset_treg)
+
+#         # laser on for time between first measure and second measure
+#         # at time = laser_readout_offset + readout_integration
+#         self.trigger_no_off(
+#             pins=[self.cfg.laser_gate_pmod],
+#             adc_trig_offset=0,
+#             t=self.cfg.laser_readout_offset_treg + self.cfg.readout_integration_treg)
+

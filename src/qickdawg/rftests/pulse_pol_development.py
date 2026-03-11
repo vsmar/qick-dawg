@@ -66,7 +66,7 @@ class PulsePolFineRes(NVAveragerProgram):
             idata = np.zeros(self.half_pi_waveform_len_treg * 16)
             qdata = np.zeros(self.half_pi_waveform_len_treg * 16)
             idata[i : i + self.cfg.mw_pi2_tdds] = 1
-            qdata[i : i + self.cfg.mw_pi2_tdds] = 0
+            qdata[i : i + self.cfg.mw_pi2_tdds] = 1
             idata *= self.soccfg.get_maxv(self.cfg.mw_channel)
             qdata *= self.soccfg.get_maxv(self.cfg.mw_channel)
             self.add_envelope(ch=self.cfg.mw_channel, name=f"half_pi_{i}", idata=idata, qdata=qdata)
@@ -75,7 +75,7 @@ class PulsePolFineRes(NVAveragerProgram):
             idata = np.zeros(self.pi_waveform_len_treg * 16)
             qdata = np.zeros(self.pi_waveform_len_treg * 16)
             idata[i: i + self.cfg.mw_pi2_tdds*2] = 1
-            qdata[i: i + self.cfg.mw_pi2_tdds*2] = 0
+            qdata[i: i + self.cfg.mw_pi2_tdds*2] = 1
             idata *= self.soccfg.get_maxv(self.cfg.mw_channel)
             qdata *= self.soccfg.get_maxv(self.cfg.mw_channel)
             self.add_envelope(ch=self.cfg.mw_channel, name=f"pi_{i}", idata=idata, qdata=qdata)
@@ -84,8 +84,8 @@ class PulsePolFineRes(NVAveragerProgram):
             idata = np.zeros(self.pi_xy_waveform_len_treg * 16)
             qdata = np.zeros(self.pi_xy_waveform_len_treg * 16)
             idata[i : i + self.cfg.mw_pi2_tdds] = 1
-            qdata[i : i + self.cfg.mw_pi2_tdds] = 0
-            idata[i + self.cfg.mw_pi2_tdds : i + self.cfg.mw_pi2_tdds*2] = 0
+            qdata[i : i + self.cfg.mw_pi2_tdds] = 1
+            idata[i + self.cfg.mw_pi2_tdds : i + self.cfg.mw_pi2_tdds*2] = -1
             qdata[i + self.cfg.mw_pi2_tdds : i + self.cfg.mw_pi2_tdds*2] = 1
             idata *= self.soccfg.get_maxv(self.cfg.mw_channel)
             qdata *= self.soccfg.get_maxv(self.cfg.mw_channel)
@@ -94,10 +94,10 @@ class PulsePolFineRes(NVAveragerProgram):
             # pi/2_Y - pi/2_X
             idata = np.zeros(self.pi_xy_waveform_len_treg * 16)
             qdata = np.zeros(self.pi_xy_waveform_len_treg * 16)
-            idata[i : i + self.cfg.mw_pi2_tdds] = 0
+            idata[i : i + self.cfg.mw_pi2_tdds] = 1
             qdata[i : i + self.cfg.mw_pi2_tdds] = 1
             idata[i + self.cfg.mw_pi2_tdds : i + self.cfg.mw_pi2_tdds*2] = 1
-            qdata[i + self.cfg.mw_pi2_tdds : i + self.cfg.mw_pi2_tdds*2] = 0
+            qdata[i + self.cfg.mw_pi2_tdds : i + self.cfg.mw_pi2_tdds*2] = -1
             idata *= self.soccfg.get_maxv(self.cfg.mw_channel)
             qdata *= self.soccfg.get_maxv(self.cfg.mw_channel)
             self.add_envelope(ch=self.cfg.mw_channel, name=f"half_pi_yx_{i}", idata=idata, qdata=qdata)
@@ -154,9 +154,9 @@ class PulsePolFineRes(NVAveragerProgram):
         # 1. π/2_x
         # 2. skip to step 4
         # 3. τ - π/2_y - π/2_x
-        # 4. τ - π_x
+        # 4. τ - π_y
         # 5. τ - π/2_y - π/2_x
-        # 6. τ - π_y
+        # 6. τ - π_-x
         # 7. loop to step 3
         # 8. τ - π/2_y
 
@@ -188,14 +188,14 @@ class PulsePolFineRes(NVAveragerProgram):
 
         # Set the skip point
         self.label("skip past π/2_y - π/2_x")
-        # 4. τ - π_x
-        self.program_pulse(type="pi") # NOTE: Phase=0
+        # 4. τ - π_y
+        self.program_pulse(type="pi", phase=90)
 
         # 5. τ - π/2_x - π/2_y
         self.program_pulse(type="half_pi_xy") # NOTE: Phase=0
         
-        # 6. τ - π_y
-        self.program_pulse(type="pi", phase=90) 
+        # 6. τ - π_-x
+        self.program_pulse(type="pi", phase=180)
 
         # 7. loop back (to 3.)
         self.loopnz(
@@ -235,7 +235,8 @@ class PulsePolFineRes(NVAveragerProgram):
         self.set_pulse_registers(ch=self.cfg.mw_channel, waveform=f"{type}_0", phase=self.deg2reg(phase)) 
 
         # updating address register to select correct waveform based on the current offset
-        self.address_register.set_to(self.tdds_offset_register, '*', self.pi_waveform_len_treg + self.pi_xy_waveform_len_treg + self.half_pi_waveform_len_treg, physical_unit=False)
+        self.address_register.set_to(self.tdds_offset_register, '*', self.half_pi_waveform_len_treg + self.pi_waveform_len_treg +
+                                      self.pi_xy_waveform_len_treg + self.pi_xy_waveform_len_treg, physical_unit=False)
 
         # choose waveform address
         if type == "pi":
