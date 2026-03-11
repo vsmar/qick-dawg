@@ -231,12 +231,12 @@ class SubnanoCPMGXY(NVAveragerProgram):
             # = n_cpmg_register % len(phase_list)
             self.bitwi(self.phase_register.page, self.phase_register.addr, 
                    self.n_cpmg_register.addr, "&", int(len(self.phase_list)-1))
-
+            
             # Isolate the pulse type from the phase sequence
             # phase_register = phase_seq_register >> (n_cpmg_register % sequence length)
             self.bitw(self.phase_register.page, self.phase_register.addr,
                        self.phase_seq_register.addr, '>>', self.phase_register.addr)
-            # Mask the LSB
+            # Mask the LSB (unnecessary if using 2 bit encoding (full range))
             self.bitwi(self.phase_register.page, self.phase_register.addr, self.phase_register.addr, "&", 1)
             
             # Decode into the phase value
