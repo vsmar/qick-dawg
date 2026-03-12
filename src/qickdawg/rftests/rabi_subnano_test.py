@@ -158,6 +158,12 @@ class SUBNANO_RABI(NVAveragerProgram):
         self.sync_all()
         self.synci(100)
 
+        self.trigger(
+            pins=[self.cfg.laser_gate_pmod],
+            width=self.cfg.laser_on_treg,              # 500 ns pulse ????
+            t=0                     # start immediately
+            )
+
         # Add delay before readout for signal to settle
         # might want to make this command timing based on the delay necessary.
 

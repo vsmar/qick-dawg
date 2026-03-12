@@ -94,10 +94,10 @@ class PulsePolFineRes(NVAveragerProgram):
             # pi/2_Y - pi/2_X
             idata = np.zeros(self.pi_xy_waveform_len_treg * 16)
             qdata = np.zeros(self.pi_xy_waveform_len_treg * 16)
-            idata[i : i + self.cfg.mw_pi2_tdds] = 1
+            idata[i : i + self.cfg.mw_pi2_tdds] = -1
             qdata[i : i + self.cfg.mw_pi2_tdds] = 1
             idata[i + self.cfg.mw_pi2_tdds : i + self.cfg.mw_pi2_tdds*2] = 1
-            qdata[i + self.cfg.mw_pi2_tdds : i + self.cfg.mw_pi2_tdds*2] = -1
+            qdata[i + self.cfg.mw_pi2_tdds : i + self.cfg.mw_pi2_tdds*2] = 1
             idata *= self.soccfg.get_maxv(self.cfg.mw_channel)
             qdata *= self.soccfg.get_maxv(self.cfg.mw_channel)
             self.add_envelope(ch=self.cfg.mw_channel, name=f"half_pi_yx_{i}", idata=idata, qdata=qdata)
@@ -136,9 +136,7 @@ class PulsePolFineRes(NVAveragerProgram):
                                      gain=self.cfg.mw_gain)
 
         # Set up register for storing and sweeping delays
-        self.delay_register = self.new_gen_reg(self.cfg.mw_channel,
-                                               name='delay',
-                                               init_val=self.cfg.delay_tdds_start - self.pi_len_unused_tdds)
+        self.delay_register = self.new_gen_reg(self.cfg.mw_channel, name='delay') # initialization happens when adding sweep
 
         self.add_sweep(NVQickSweep(
             self,
@@ -161,12 +159,10 @@ class PulsePolFineRes(NVAveragerProgram):
         # 8. τ - π/2_y
 
         self.sync_all(self.cfg.inherent_trigger_to_pulses_delay_treg)
-        self.trigger(pins=[self.cfg.pmod_out_pin], width=self.cfg.pmod_out_pulse_width_treg)
+        self.trigger(pins=[self.cfg.pmod_out_pin], width=self.cfg.pmod_out_pulse_width_treg, t=0)
         self.sync_all(self.cfg.pmod_out_trig_delay_treg)
 
-        self.tdds_offset_register.reset()  # reset the dds_offset adjustment
-        self.tdds_offset_register.set_to(self.tdds_offset_register, '-', self.delay_register) # account for first pi
-
+        self.tdds_offset_register.reset()  # reset the dds_offset adjustment (reset value should account for first pi)
         self.n_pulsepol_register.reset()
 
         # 1. π/2_x
@@ -184,7 +180,6 @@ class PulsePolFineRes(NVAveragerProgram):
 
         # 3. τ - π/2_y - π/2_x
         self.program_pulse(type="half_pi_yx") # NOTE: Phase=0
-        self.pulse(ch=self.cfg.mw_channel)
 
         # Set the skip point
         self.label("skip past π/2_y - π/2_x")
@@ -248,7 +243,7 @@ class PulsePolFineRes(NVAveragerProgram):
             self.address_register.set_to(self.address_register, '+',
                                           self.half_pi_waveform_len_treg + self.pi_waveform_len_treg + self.pi_xy_waveform_len_treg, 
                                           physical_unit=False)
-        
+
         # NOTE: For neatness delay and pulse calls are embedded here (cost: 1 additional line of instruction memory).
         # Coarse delay
         self.sync(self.treg_offset_register.page, self.treg_offset_register.addr)
