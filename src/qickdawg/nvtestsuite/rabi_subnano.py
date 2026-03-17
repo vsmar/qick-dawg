@@ -30,6 +30,7 @@ class SUBNANO_RABI(NVAveragerProgram):
     An NVAveragerProgram class that generates RF gain and frequency stepping sequences.
     '''
     required_cfg = [
+        "adc_channel",
         "mw_channel", # MW Channel
         "mw_nqz", # 1 at 1405 MHz
         "mw_freg", # MW FREQ (~1405 MHz for QDP)
@@ -49,9 +50,6 @@ class SUBNANO_RABI(NVAveragerProgram):
         "readout_integration_treg",
         "mw_to_laser_delay_treg", # Positive 
         "laser_readout_offset_tus",
-        # "readout_reference_start_treg", # second readout reference (if using default ttl_readout())
-        "relax_delay_treg",
-        "loop_delay_treg" # delay between laser off and next loop
         ]
 
     def initialize(self):
@@ -110,15 +108,8 @@ class SUBNANO_RABI(NVAveragerProgram):
         self.wvfm_addr_register = self.get_gen_reg(self.cfg.mw_channel, name='addr')
         
         # Setup laser
-        self.declare_readout(ch=self.cfg.laser_gate_pmod, length=self.cfg.laser_on_treg)
+        self.setup_readout()
         
-        # if self.cfg.pre_init:
-
-        #     self.trigger(
-        #         pins=[self.cfg.laser_gate_pmod],
-        #         width=self.cfg.laser_on_treg, 
-        #         adc_trig_offset=0)
-
         # give processor some time to configure pulses
         self.synci(200)
 
