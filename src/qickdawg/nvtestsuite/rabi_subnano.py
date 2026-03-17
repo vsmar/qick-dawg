@@ -47,7 +47,7 @@ class SUBNANO_RABI(NVAveragerProgram):
 
         # Readout and delays
         "readout_integration_treg",
-        "mw_laser_delay_treg", # Typically negative
+        "mw_to_laser_delay_treg", # Positive 
         "laser_readout_offset_tus",
         # "readout_reference_start_treg", # second readout reference (if using default ttl_readout())
         "relax_delay_treg",
@@ -112,13 +112,12 @@ class SUBNANO_RABI(NVAveragerProgram):
         # Setup laser
         self.declare_readout(ch=self.cfg.laser_gate_pmod, length=self.cfg.laser_on_treg)
         
-        if self.cfg.pre_init:
+        # if self.cfg.pre_init:
 
-            self.trigger(
-                pins=[self.cfg.laser_gate_pmod],
-                width=self.cfg.laser_on_treg, 
-                adc_trig_offset=0)
-            self.sync_all(self.cfg.laser_on_treg)
+        #     self.trigger(
+        #         pins=[self.cfg.laser_gate_pmod],
+        #         width=self.cfg.laser_on_treg, 
+        #         adc_trig_offset=0)
 
         # give processor some time to configure pulses
         self.synci(200)
@@ -133,44 +132,120 @@ class SUBNANO_RABI(NVAveragerProgram):
         - MW 
         - Laser Readout
         """
+        self.laser_init()
+
+        self.program_pulses(rf_on=True)
+
+        self.readout()
+        
+        self.laser_init()
+
         self.sync_all()
 
-        # Laser Init
+        self.program_pulses(rf_on=False)
+
+        self.readout()
+
+
+    def program_pulses(self, rf_on=True):
+        if rf_on:
+            # MW PULSES
+            # Fine delay adjustment and assignment
+            self.bitwi(self.wvfm_addr_register.page, self.wvfm_addr_register.addr,
+                    self.pulse_length_register.addr, "&", (self.samps_per_clk - 1))
+            self.wvfm_addr_register.set_to(self.wvfm_addr_register, '*', self.wvfm_length_treg, physical_unit = False)
+            # Coarse adjustment
+            self.bitwi(self.coarse_pulse_duration.page, self.coarse_pulse_duration.addr,
+                    self.pulse_length_register.addr, '>>', self.tuning_num)
+
+            # PLAY RF PULSE:
+            # Play waveform (start pulse)
+            self.set_pulse_registers(self.cfg.mw_channel, outsel = "product", stdysel = "last")
+            self.pulse(ch=self.cfg.mw_channel, t=0)
+            # Coarse adjustment delay
+            self.sync(self.coarse_pulse_duration.page, self.coarse_pulse_duration.addr)
+            # Play 0 pulse (turn off pulse)
+            self.set_pulse_registers(self.cfg.mw_channel, outsel = "zero")
+            self.pulse(ch=self.cfg.mw_channel)
+        else:
+            self.synci(self.wvfm_length_treg * 2)
+            self.sync(self.coarse_pulse_duration.page, self.coarse_pulse_duration.addr)
+        
+        self.sync_all()
+
+
+    def laser_init(self):
         self.trigger(
             pins=[self.cfg.laser_gate_pmod],
             adc_trig_offset=self.cfg.laser_readout,
             width=self.cfg.laser_init_treg,
             t=0)
-
-        # Fine delay adjustment and assignment
-        self.bitwi(self.wvfm_addr_register.page, self.wvfm_addr_register.addr,
-                   self.pulse_length_register.addr, "&", (self.samps_per_clk - 1))
-        self.wvfm_addr_register.set_to(self.wvfm_addr_register, '*', self.wvfm_length_treg, physical_unit = False)
-        # Coarse adjustment
-        self.bitwi(self.coarse_pulse_duration.page, self.coarse_pulse_duration.addr,
-                self.pulse_length_register.addr, '>>', self.tuning_num)
-
-        # PLAY RF PULSE:
-        # Play waveform (start pulse)
-        self.set_pulse_registers(self.cfg.mw_channel, outsel = "product", stdysel = "last")
-        self.pulse(ch=self.cfg.mw_channel, t=0)
-        # Coarse adjustment delay
-        self.sync(self.coarse_pulse_duration.page, self.coarse_pulse_duration.addr)
-        # Play 0 pulse (turn off pulse)
-        self.set_pulse_registers(self.cfg.mw_channel, outsel = "zero")
-        self.pulse(ch=self.cfg.mw_channel)
-        self.sync_all()
-
+        self.sync_all(self.cfg.mw__to_laser_delay_treg)
+    
+    def readout(self):
+        # RO
         # Laser only
         self.trigger_no_off(
             pins=[self.cfg.laser_gate_pmod],
-            adc_trig_offset=self.cfg.laser_readout,
+            adc_trig_offset=0,
             t=0)
         
         # Laser + ADC
-        self.trigger_no_off(
+        self.trigger(
             adcs=self.cfg.adcs,
             pins=[self.cfg.laser_gate_pmod],
-            adc_trig_offset=self.cfg.mw_laser_delay_treg,
+            adc_trig_offset=0,
+            width=self.cfg.readout_integration_treg,
             t=self.cfg.laser_readout_offset_treg)
-    
+        
+        self.sync_all()
+
+    def acquire(self, raw_data=False, *arg, **kwarg):
+        data = super().acquire(readouts_per_experiment=2, *arg, **kwarg)
+
+        if raw_data is False:
+            data = self.analyze_results(data)
+
+        return data
+
+    def analyze_results(self, data):
+        """
+        Method that takes in a 1D array of data points from self.acquire() and analyzes the
+        results based on the number of reps and frequency points
+
+        Parameters
+        ----------
+        data
+            (1D np.array) data returned from self.acquire()
+
+        returns
+            (qickdawg.ItemAttribute instance) with attributes
+            .frequencies (len(nsweep_points) np array, MHz units) - frequencies swept over
+            .signal (nfrequency np.array, adc units)
+                - average adc signal with MW pulse
+            .reference (nfrequency np.array, adc units)
+                - signal at the end of the reinitialization pulse
+            .contrast (nfrequency np.array, fractional units)
+                - (signal - reference) / reference
+        """
+        data = np.reshape(data, self.data_shape)
+        
+        d = ItemAttribute()
+        d.signal = data[..., 0]
+        d.reference = data[..., 1]
+        
+        # Average over all axes except the last (frequency) axis
+        n = len(d.signal.shape) - 1
+        
+        for key in ['signal', 'reference']:
+            d[key] = apply_on_axis_0_n_times(d[key], np.sum, n)
+            d[key] = d[key] / (self.cfg.readout_integration_tns * 1e-9 * self.cfg.reps)
+
+                
+        # Calculate signal/reference
+        d.contrast = d.signal / d.reference
+        
+        # Add frequency axis
+        d.frequencies = self.qick_sweeps[0].get_sweep_pts()
+        
+        return d
