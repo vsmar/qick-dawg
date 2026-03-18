@@ -25,7 +25,7 @@ import os
 # To follow timing conventions, I've decided to start using
 # _tdds to refer to a samples timing resolution in a waveform/dds
 
-class SUBNANO_RABI(NVAveragerProgram):
+class RABI_SUBNANO(NVAveragerProgram):
     '''
     An NVAveragerProgram class that generates RF gain and frequency stepping sequences.
     '''
@@ -49,7 +49,7 @@ class SUBNANO_RABI(NVAveragerProgram):
         # Readout and delays
         "readout_integration_treg",
         "mw_to_laser_delay_treg", # Positive 
-        "laser_readout_offset_tus",
+        "laser_readout_offset_treg",
         ]
 
     def initialize(self):
@@ -109,6 +109,18 @@ class SUBNANO_RABI(NVAveragerProgram):
         
         # Setup laser
         self.setup_readout()
+
+        # start from a close to initialized state
+        if self.cfg.pre_init:
+            self.trigger( # Laser
+                pins=[self.cfg.laser_gate_pmod],
+                adc_trig_offset=0,
+                width=self.cfg.readout_integration_treg + self.cfg.laser_readout_offset_treg,
+                t=0)
+            self.wait_all(self.cfg.readout_integration_treg + self.cfg.laser_readout_offset_treg)
+            self.sync_all(self.cfg.readout_integration_treg + self.cfg.laser_readout_offset_treg + 200)
+        else:
+            self.sync_all(200)  # give processor some time to configure pulses
         
         # give processor some time to configure pulses
         self.synci(200)
@@ -166,30 +178,24 @@ class SUBNANO_RABI(NVAveragerProgram):
 
 
     def laser_init(self):
-        self.trigger(
-            pins=[self.cfg.laser_gate_pmod],
-            adc_trig_offset=self.cfg.laser_readout,
-            width=self.cfg.laser_init_treg,
-            t=0)
-        self.sync_all(self.cfg.mw__to_laser_delay_treg)
+        self.trigger(pins = [self.cfg.laser_gate_pmod], width = self.cfg.laser_init_treg)
+        self.wait_all(self.cfg.laser_init_treg)
+        self.sync_all(self.cfg.laser_init_treg + self.cfg.mw_to_laser_delay_treg)
     
     def readout(self):
         # RO
-        # Laser only
-        self.trigger_no_off(
+        self.trigger_no_off( # Laser
             pins=[self.cfg.laser_gate_pmod],
-            adc_trig_offset=0,
             t=0)
-        
-        # Laser + ADC
-        self.trigger(
+        self.trigger( # Laser + ADC
             adcs=self.cfg.adcs,
             pins=[self.cfg.laser_gate_pmod],
             adc_trig_offset=0,
             width=self.cfg.readout_integration_treg,
             t=self.cfg.laser_readout_offset_treg)
+        self.wait_all(self.cfg.readout_integration_treg)
+        self.sync_all(self.cfg.readout_integration_treg +self.cfg.pulse_seq_delay_treg)
         
-        self.sync_all()
 
     def acquire(self, raw_data=False, *arg, **kwarg):
         data = super().acquire(readouts_per_experiment=2, *arg, **kwarg)
