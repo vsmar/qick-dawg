@@ -7,7 +7,6 @@ Edit the EXPERIMENT PARAMETERS block before each run.
 Everything else is pulled from config.yaml via config.py.
 """
 
-from copy import copy
 from datetime import datetime
 from pathlib import Path
 
@@ -20,7 +19,7 @@ from scipy.optimize import curve_fit
 import qickdawg as qd
 from qickdawg import PODMRFineRes
 
-from config import load_config, build_nv_config, connect, ns_to_samples, mhz_to_freg
+from config import load_config, build_nv_config, connect, ns_to_samples
 
 # =============================================================================
 # EXPERIMENT PARAMETERS — edit these before each run
@@ -32,15 +31,17 @@ ODMR_START_MHZ  = 1840.0   # MHz
 ODMR_STOP_MHZ   = 1850.0   # MHz
 ODMR_DELTA_MHZ  = 0.1      # MHz  (step size)
 
-# MW Pulse duration in nanoseconds — converted to samples automatically.
-# Override calibration value if not None.
-MW_DURATION_NS  = None     # None = use calibration.pi_pulse_tns from default_transition
-
 REPS            = 1
 
 # Transition — set to "lower_dip", "upper_dip", or None to use config.yaml default.
 # Swapping here also pulls in the correct freq_fMHz, mw_gain for that transition.
 TRANSITION      = None     # None = use calibration.default_transition
+
+# Optional per-run overrides. If left None, values come from transition calibration.
+OVERRIDE_FREQ_MHZ = None   # e.g. 1845.7
+OVERRIDE_MW_GAIN  = None   # e.g. 1800
+OVERRIDE_MW_DURATION_NS = None # pi pulse
+
 PULSE_SEQ_DELAY_TUS = 0.2  # us — overrides config.yaml default for PODMR
 GET_REFERENCE   = True     # acquire reference readout with MW gain = 0
 
@@ -58,54 +59,44 @@ soccfg = qd.soccfg
 
 config = build_nv_config(cfg)
 
-# Convert sweep bounds from MHz → freg
 mw_ch = cfg["hardware"]["mw_channel"]
-start_freg = mhz_to_freg(ODMR_START_MHZ,  soccfg, mw_ch)
-stop_freg  = mhz_to_freg(ODMR_STOP_MHZ,   soccfg, mw_ch)
-delta_freg = mhz_to_freg(ODMR_DELTA_MHZ,  soccfg, mw_ch)
 
-# Calculate number of sweep points from bounds and step
+# Choose transition context: explicit TRANSITION, otherwise config default.
+active_transition = TRANSITION or cfg["calibration"]["default_transition"]
+t = cfg["calibration"][active_transition]
+
+# Resolve run parameters with precedence:
+# explicit file override -> selected/default transition values.
+config.freq_fMHz = OVERRIDE_FREQ_MHZ if OVERRIDE_FREQ_MHZ is not None else t["freq_fMHz"]
+config.mw_gain   = OVERRIDE_MW_GAIN  if OVERRIDE_MW_GAIN  is not None else t["mw_gain"]
+
+# Configure frequency sweep (start/stop in freg)
+config.add_linear_sweep('mw', 'fMHz', start=ODMR_START_MHZ, stop=ODMR_STOP_MHZ, delta=ODMR_DELTA_MHZ)
 nsweep_points = int(round((ODMR_STOP_MHZ - ODMR_START_MHZ) / ODMR_DELTA_MHZ)) + 1
 
-print(f"[podmr] Frequency sweep: {ODMR_START_MHZ} → {ODMR_STOP_MHZ} MHz "
-      f"(Δ {ODMR_DELTA_MHZ} MHz)  |  {nsweep_points} points")
-print(f"[podmr] In freg units: {start_freg} → {stop_freg}  (Δ {delta_freg})")
-
 # Determine MW pulse duration (ns → tdds samples)
-if MW_DURATION_NS is not None:
-    mw_duration_tdds = ns_to_samples(MW_DURATION_NS, soccfg, mw_ch)
-    duration_source = f"{MW_DURATION_NS} ns (user override)"
-else:
-    # Use calibration.pi_pulse_tns from the active transition
-    t = cfg["calibration"][cfg["calibration"]["default_transition"]]
-    mw_pi_ns = t["pi_pulse_tns"]
-    if mw_pi_ns is None:
-        raise ValueError(
-            "MW_DURATION_NS is None and calibration.pi_pulse_tns is not set. "
-            "Either set MW_DURATION_NS above or run a calibration first."
-        )
-    mw_duration_tdds = ns_to_samples(mw_pi_ns, soccfg, mw_ch)
-    duration_source = f"{mw_pi_ns} ns (calibration.pi_pulse_tns)"
+mw_duration_ns = OVERRIDE_MW_DURATION_NS
+if mw_duration_ns is None:
+    mw_duration_ns = t["pi_pulse_tns"]
+if mw_duration_ns is None:
+    raise ValueError(
+        "No pi pulse duration found. Set OVERRIDE_MW_DURATION_NS, "
+        "or provide calibration.<transition>.pi_pulse_tns in config.yaml."
+    )
 
-print(f"[podmr] MW duration: {duration_source} → {mw_duration_tdds} tdds samples")
+config.mw_duration_tdds = ns_to_samples(mw_duration_ns, soccfg, mw_ch)
+if OVERRIDE_MW_DURATION_NS is not None:
+    duration_source = f"{mw_duration_ns} ns (OVERRIDE_MW_DURATION_NS)"
+else:
+    duration_source = f"{mw_duration_ns} ns (calibration.{active_transition}.pi_pulse_tns)"
+
+print(f"[podmr] MW duration: {duration_source} → {config.mw_duration_tdds} tdds samples")
+print(f"[podmr] Active transition: {active_transition} | freq={config.freq_fMHz} MHz | gain={config.mw_gain}")
 
 # Apply experiment-specific overrides
-if TRANSITION is not None:
-    t = cfg["calibration"][TRANSITION]
-    config.freq_fMHz = t["freq_fMHz"]
-    config.mw_gain   = t["mw_gain"]
-
 config.pulse_seq_delay_tus = PULSE_SEQ_DELAY_TUS
 config.reps                = REPS
 config.get_reference       = GET_REFERENCE
-
-# Configure frequency sweep (start/stop in freg)
-config.mw_start_freg = start_freg
-config.mw_end_freg   = stop_freg
-config.nsweep_points = nsweep_points
-
-# Configure MW pulse
-config.mw_duration_tdds = mw_duration_tdds
 
 # =============================================================================
 # Acquire
@@ -133,16 +124,16 @@ with h5py.File(out_path, "w") as f:
     exp.attrs["odmr_start_mhz"]     = ODMR_START_MHZ
     exp.attrs["odmr_stop_mhz"]      = ODMR_STOP_MHZ
     exp.attrs["odmr_delta_mhz"]     = ODMR_DELTA_MHZ
-    exp.attrs["odmr_start_freg"]    = start_freg
-    exp.attrs["odmr_stop_freg"]     = stop_freg
-    exp.attrs["odmr_delta_freg"]    = delta_freg
+    exp.attrs["odmr_start_freg"]    = config.mw_start_fMHz
+    exp.attrs["odmr_stop_freg"]     = config.mw_stop_fMHz
+    exp.attrs["odmr_delta_freg"]    = config.mw_delta_fMHz
     exp.attrs["nsweep_points"]      = nsweep_points
-    exp.attrs["mw_duration_ns"]     = MW_DURATION_NS or cfg["calibration"][cfg["calibration"]["default_transition"]].get("pi_pulse_tns")
-    exp.attrs["mw_duration_tdds"]   = mw_duration_tdds
+    exp.attrs["mw_duration_ns"]     = mw_duration_ns
+    exp.attrs["mw_duration_tdds"]   = config.mw_duration_tdds
     exp.attrs["reps"]               = REPS
     exp.attrs["freq_mhz"]           = config.freq_fMHz
     exp.attrs["mw_gain"]            = config.mw_gain
-    exp.attrs["transition"]         = TRANSITION or cfg["calibration"]["default_transition"]
+    exp.attrs["transition"]         = active_transition
     exp.attrs["pulse_seq_delay_tus"] = PULSE_SEQ_DELAY_TUS
     exp.attrs["get_reference"]      = GET_REFERENCE
     exp.attrs["timestamp"]          = timestamp
