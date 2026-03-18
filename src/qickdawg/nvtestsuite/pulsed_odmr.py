@@ -92,7 +92,7 @@ class PODMR(NVAveragerProgram):
                                 self.cfg.mw_start_fMHz,  # Use fMHz like LockinODMR
                                 self.cfg.mw_end_fMHz,
                                 self.cfg.nsweep_points))
-
+        
         self.synci(100)  # give processor some time to configure pulses
         if (self.cfg.ddr4 is True) or (self.cfg.mr is True):
             self.trigger(ddr4=self.cfg.ddr4, mr=self.cfg.mr, adc_trig_offset=0)
@@ -136,7 +136,6 @@ class PODMR(NVAveragerProgram):
         self.synci(self.cfg.mw_laser_delay_treg)
         # laser on
         self.ttl_readout()
-        
         
     def acquire(self, raw_data=False, *arg, **kwarg):
         data = super().acquire(readouts_per_experiment=2, *arg, **kwarg)

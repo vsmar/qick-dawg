@@ -9,13 +9,12 @@ Modified from Tommy's RabiFineRes program. See his notebook for more details on 
 
 from qickdawg.nvpulsing.nvaverageprogram import NVAveragerProgram
 from qickdawg.nvpulsing.nvqicksweep import NVQickSweep
+from .readout_helpers import ReadoutHelpers
 import numpy as np
-from itemattribute import ItemAttribute
-from ..util import apply_on_axis_0_n_times
 
 
 
-class RabiFineRes(NVAveragerProgram):
+class RabiFineRes(NVAveragerProgram, ReadoutHelpers):
     '''
     Rabi sub-nanosecond resolution pulsing program
     '''
@@ -36,6 +35,7 @@ class RabiFineRes(NVAveragerProgram):
         "readout_integration_treg",
         "mw_to_laser_delay_treg", # Positive 
         "laser_readout_offset_treg",
+        "get_reference",  # Whether to acquire a reference readout with MW gain = 0
     ]
 
     def initialize(self):
@@ -43,6 +43,9 @@ class RabiFineRes(NVAveragerProgram):
 
         # Get mw registers
         self.declare_gen(ch=self.cfg.mw_channel, nqz=self.cfg.mw_nqz)
+
+        # Setup readout validation and gain register
+        self.setup_readout_registers(self.cfg.mw_channel)
 
         # Get samps per clk for later calculations. should be 16 for mw with current version rfsoc 11/14/2025
         # if this changes from 16 then need to change waveform generation part
@@ -95,39 +98,14 @@ class RabiFineRes(NVAveragerProgram):
 
         # start from a close to initialized state
         if self.cfg.pre_init:
-            self.trigger( # Laser
-                pins=[self.cfg.laser_gate_pmod],
-                adc_trig_offset=0,
-                width=self.cfg.readout_integration_treg + self.cfg.laser_readout_offset_treg,
-                t=0)
-            self.wait_all(self.cfg.readout_integration_treg + self.cfg.laser_readout_offset_treg)
-            self.sync_all(self.cfg.readout_integration_treg + self.cfg.laser_readout_offset_treg + 200)
-        else:
-            self.sync_all(200)  # give processor some time to configure pulses
+            self.pre_init()
+        
+        self.synci(200)  # Give tproc time to get ahead
 
     def body(self):
-        # Initialize
-        # laser_init_treg = self.cfg.laser_init_treg - (self.cfg.laser_readout_offset_treg + self.cfg.readout_integration_treg)
-        self.trigger(pins = [self.cfg.laser_gate_pmod], width = self.cfg.laser_init_treg)
-        self.wait_all(self.cfg.laser_init_treg)
-        self.sync_all(self.cfg.laser_init_treg + self.cfg.mw_to_laser_delay_treg)
-
-        # MW Pulse
+        self.laser_init()
         self.program_pulses()
-        self.sync_all()
-
-        # Readout
-        self.trigger_no_off( # Laser
-            pins=[self.cfg.laser_gate_pmod],
-            t=0)
-        self.trigger( # Laser + ADC
-            adcs=self.cfg.adcs,
-            pins=[self.cfg.laser_gate_pmod],
-            adc_trig_offset=0,
-            width=self.cfg.readout_integration_treg,
-            t=self.cfg.laser_readout_offset_treg)
-        self.wait_all(self.cfg.readout_integration_treg)
-        self.sync_all(self.cfg.readout_integration_treg +self.cfg.pulse_seq_delay_treg)
+        self.signal_and_reference_readout(self.program_pulses)
 
     def program_pulses(self):
         # set coarse and fine registers based on duration. coarse is x//64 and then multiply by 4 to get treg units
@@ -149,54 +127,19 @@ class RabiFineRes(NVAveragerProgram):
         self.set_pulse_registers(ch=self.cfg.mw_channel, waveform=f"pulse_{0}", mode = "oneshot")
         self.address_register.set_to(self.fine_mw_register, '*', self.mw_pulse_waveform_len_treg, physical_unit = False)
         self.pulse(ch=self.cfg.mw_channel)
+        self.sync_all()
 
-
-    def acquire(self, raw_data=False, *arg, **kwarg):
-        data = super().acquire(readouts_per_experiment=1, *arg, **kwarg)
-
-        if raw_data is False:
-            data = self.analyze_results(data)
-
-        return data
 
     def analyze_results(self, data):
         """
-        Method that takes in a 1D array of data points from self.acquire() and analyzes the
-        results based on the number of reps and frequency points
-
-        Parameters
-        ----------
-        data
-            (1D np.array) data returned from self.acquire()
-
-        returns
-            (qickdawg.ItemAttribute instance) with attributes
-            .frequencies (len(nsweep_points) np array, MHz units) - frequencies swept over
-            .signal (nfrequency np.array, adc units)
-                - average adc signal with MW pulse
-            .reference (nfrequency np.array, adc units)
-                - signal at the end of the reinitialization pulse
-            .contrast (nfrequency np.array, fractional units)
-                - (signal - reference) / reference
+        Analyze Rabi sweep results, renaming sweep_pts to duration.
+        Uses parent helper's analysis for signal/reference/contrast extraction.
+        
+        Returns ItemAttribute with: signal, reference (opt), contrast (opt), duration
         """
-        data = np.reshape(data, self.data_shape)
-        
-        d = ItemAttribute()
-        d.signal = data[..., 0]
-        d.reference = data[..., 1]
-        
-        # Average over all axes except the last (frequency) axis
-        n = len(d.signal.shape) - 1
-        
-        for key in ['signal', 'reference']:
-            d[key] = apply_on_axis_0_n_times(d[key], np.sum, n)
-            d[key] = d[key] / (self.cfg.readout_integration_tns * 1e-9 * self.cfg.reps)
-
-                
-        # Calculate signal/reference
-        d.contrast = d.signal / d.reference
-        
-        # Add frequency axis
-        d.frequencies = self.qick_sweeps[0].get_sweep_pts()
-        
+        d = super().analyze_results(data)
+        # Rename sweep_pts to duration for clarity
+        if hasattr(d, 'sweep_pts'):
+            d.duration = d.sweep_pts
+            del d.sweep_pts
         return d

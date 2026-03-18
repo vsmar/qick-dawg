@@ -9,11 +9,10 @@ Modified from Tommy's RabiFineRes program. See his notebook for more details on 
 
 from qickdawg.nvpulsing.nvaverageprogram import NVAveragerProgram
 from qickdawg.nvpulsing.nvqicksweep import NVQickSweep
+from .readout_helpers import ReadoutHelpers
 import numpy as np
-from itemattribute import ItemAttribute
-from ..util import apply_on_axis_0_n_times
 
-class CountingDurationFineRes(NVAveragerProgram):
+class CountingDurationFineRes(NVAveragerProgram, ReadoutHelpers):
     '''
     Rabi sub-nanosecond resolution pulsing program
     '''
@@ -33,16 +32,17 @@ class CountingDurationFineRes(NVAveragerProgram):
         "readout_integration_treg",
         "mw_to_laser_delay_treg", # Positive 
         "laser_readout_offset_treg",
+        "get_reference",  # Whether to acquire a reference readout with MW gain = 0
     ]
 
     def initialize(self):
-        if self.cfg.laser_init_treg < self.cfg.laser_readout_offset_treg + self.cfg.readout_integration_treg:
-            raise ValueError("laser_init_treg must be long enough to account for the readout offset and integration time to ensure the system is initialized before readout starts.")
-
         self.check_cfg()
 
         # Get mw registers
         self.declare_gen(ch=self.cfg.mw_channel, nqz=self.cfg.mw_nqz)
+
+        # Setup readout validation and gain register
+        self.setup_readout_registers(self.cfg.mw_channel)
 
         # Get samps per clk for later calculations. should be 16 for mw with current version rfsoc 11/14/2025
         # if this changes from 16 then need to change waveform generation part
@@ -65,6 +65,7 @@ class CountingDurationFineRes(NVAveragerProgram):
                                      style='arb',
                                      freq=self.cfg.freq_freg,
                                      gain=self.cfg.mw_gain,
+                                     waveform="pulse",
                                      phase = 0)
                 
         # Setup laser
@@ -72,68 +73,22 @@ class CountingDurationFineRes(NVAveragerProgram):
 
         # start from a close to initialized state
         if self.cfg.pre_init:
-            self.trigger( # Laser
-                pins=[self.cfg.laser_gate_pmod],
-                adc_trig_offset=0,
-                width=self.cfg.readout_integration_treg + self.cfg.laser_readout_offset_treg,
-                t=0)
-            self.wait_all(self.cfg.readout_integration_treg + self.cfg.laser_readout_offset_treg)
-            self.sync_all(self.cfg.readout_integration_treg + self.cfg.laser_readout_offset_treg + 200)
-        else:
-            self.sync_all(200)  # give processor some time to configure pulses
+            self.pre_init()
+        
+        self.synci(200)  # Give tproc time to get ahead
 
     def body(self):
-        # Compute duration of laser pulse directly before trigger based on the total initialization time
-        # laser_init_accounted_treg = self.cfg.laser_init_treg - (self.cfg.laser_readout_offset_treg + self.cfg.readout_integration_treg)
+        # Initialize
+        self.laser_init()
 
-        # self.trigger(pins = [self.cfg.laser_gate_pmod], width = laser_init_accounted_treg)
-        # self.sync_all(self.cfg.mw_to_laser_delay_treg + laser_init_accounted_treg)
+        # MW Pulse
+        self.program_pulse()
 
-        # init
-        self.trigger(pins = [self.cfg.laser_gate_pmod], width = self.cfg.laser_init_treg)
-        self.wait_all(self.cfg.laser_init_treg)
-        self.sync_all(self.cfg.laser_init_treg + self.cfg.mw_to_laser_delay_treg)
+        # Readout with optional reference
+        self.signal_and_reference_readout(self.program_pulse)
 
-        self.set_pulse_registers(ch=self.cfg.mw_channel, waveform="pulse")
-        self.pulse(ch=self.cfg.mw_channel) 
+    def program_pulse(self):
+        """Program the MW pulse sequence"""
+        self.pulse(ch=self.cfg.mw_channel)
         self.sync_all()
 
-        # Readout
-        self.trigger_no_off( # Laser
-            pins=[self.cfg.laser_gate_pmod],
-            t=0)
-        self.trigger( # Laser + ADC
-            adcs=self.cfg.adcs,
-            pins=[self.cfg.laser_gate_pmod],
-            adc_trig_offset=0,
-            width=self.cfg.readout_integration_treg,
-            t=self.cfg.laser_readout_offset_treg)
-        self.wait_all(self.cfg.readout_integration_treg)
-
-        self.sync_all(self.cfg.readout_integration_treg +self.cfg.pulse_seq_delay_treg)
-
-
-
-    def acquire(self, raw_data=False, *arg, **kwarg):
-        data = super().acquire(readouts_per_experiment=1, *arg, **kwarg)
-
-        if raw_data is False:
-            data = self.analyze_results(data)
-
-        return data
-        
-    def analyze_results(self, data):
-        d = ItemAttribute()
-
-        # Ensure it's a numpy scalar/array
-        data = np.asarray(data)
-
-        # Extract scalar value safely
-        d.signal = data.item() if data.ndim == 0 else data
-
-        # Normalize
-        d.signal = d.signal / (
-            self.cfg.readout_integration_treg * self.cfg.reps
-        )
-
-        return d
