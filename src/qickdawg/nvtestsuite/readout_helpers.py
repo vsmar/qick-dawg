@@ -135,14 +135,15 @@ class ReadoutHelpers:
             n = len(d.signal.shape) - 1
             from ..util import apply_on_axis_0_n_times
             d.signal = apply_on_axis_0_n_times(d.signal, np.sum, n)
-            d.signal = d.signal / norm_factor
+            d.signal_cts_s = d.signal / norm_factor
             
             # Extract and process reference if available
             if self.cfg.get_reference and data.shape[-1] > 1:
                 d.reference = data[..., 1]
                 d.reference = apply_on_axis_0_n_times(d.reference, np.sum, n)
-                d.reference = d.reference / norm_factor
-                d.contrast = d.signal / d.reference
+                d.reference_cts_s = d.reference / norm_factor
+                d.contrast = d.signal_cts_s / d.reference_cts_s
+                # maybe rename to signal/reference since contrast can mean something different
         
         # Add sweep points if available (subclass should override to rename as appropriate)
         if hasattr(self, 'qick_sweeps') and len(self.qick_sweeps) > 0:

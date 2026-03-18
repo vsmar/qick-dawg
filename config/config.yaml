@@ -1,0 +1,74 @@
+# =============================================================================
+# NV Experiment Configuration
+# =============================================================================
+# Human-readable units throughout:
+#   _tus  = microseconds    (laser/readout timing — qickdawg converts to _treg)
+#   _tns  = nanoseconds     (laser/readout timing — qickdawg converts to _treg)
+#   _fMHz = MHz             (frequency — qickdawg converts to _freg)
+#
+# Fine-resolution MW timing (pi/pi2 pulse durations) is stored under calibration
+# in nanoseconds and converted to _tdds samples at runtime by config.py.
+
+
+# -----------------------------------------------------------------------------
+# Infrastructure
+# -----------------------------------------------------------------------------
+infrastructure:
+  qick_ip: "192.168.3.1"
+  qickdawg_version: "0.1.0"
+  numpy_version: "1.26.4"
+
+
+# -----------------------------------------------------------------------------
+# Hardware / Channel Mapping
+# -----------------------------------------------------------------------------
+hardware:
+  adc_channel: 0
+  mw_channel: 0
+  mw_nqz: 1
+  laser_gate_pmod: 0
+
+
+# -----------------------------------------------------------------------------
+# Optics
+# Update before each run series.
+# -----------------------------------------------------------------------------
+optics:
+  excitation_laser_power_mW: 0.302    # REQUIRED — measure and update before running
+  excitation_laser_wavelength_nm: 532
+
+
+# -----------------------------------------------------------------------------
+# Standard Pulse Timing
+# Laser and readout parameters — assigned via qickdawg human-unit setters,
+# which handle _treg conversion internally.
+# -----------------------------------------------------------------------------
+timing:
+  laser_init_tus: 2
+  readout_integration_tns: 500
+  mw_to_laser_delay_tns: 555
+  laser_readout_offset_tus: 1.2
+  pulse_seq_delay_tus: 1
+  pre_init: true
+
+
+# -----------------------------------------------------------------------------
+# Calibration
+# Updated after calibration runs. Inherited by all subsequent experiments.
+# Each NV transition has its own frequency, gain, and pulse durations since
+# these are all interdependent — gain affects pi time, etc.
+# -----------------------------------------------------------------------------
+calibration:
+  default_transition: lower_dip     # which transition build_nv_config() defaults to
+
+  lower_dip:                        # ms = -1 transition
+    freq_fMHz: 1845.74
+    mw_gain: 1800
+    pi_pulse_tns: 650              # set after Rabi calibration at this frequency
+    pi2_pulse_tns: 325
+
+  upper_dip:                        # ms = +1 transition
+    freq_fMHz: 3895.05
+    mw_gain: 5000                   # may differ from lower_dip — recalibrate
+    pi_pulse_tns: null
+    pi2_pulse_tns: null

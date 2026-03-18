@@ -65,7 +65,8 @@ class PODMRFineRes(NVAveragerProgram, ReadoutHelpers):
         self.default_pulse_registers(ch=self.cfg.mw_channel,
                                      style='arb',
                                      freq=self.cfg.mw_start_freg,
-                                     gain=self.cfg.mw_gain,                                     waveform="pulse",                                     waveform="pulse",
+                                     gain=self.cfg.mw_gain,
+                                     waveform="pulse",
                                      phase=0)
         
         # Setup frequency sweep
