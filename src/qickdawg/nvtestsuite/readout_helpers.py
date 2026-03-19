@@ -23,7 +23,7 @@ class ReadoutHelpers:
     #                        f"laser_init_treg - (laser_readout_offset_treg + readout_integration_treg) > 3. "
     #                        f"Current calculated duration: {laser_init_duration}")
     
-    def setup_readout_registers(self, mw_channel):
+    def setup_helper_registers(self, mw_channel):
         """Setup registers and validation for readout sequence"""
         # self.check_laser_init_timing()
         self.mw_gain_register = self.get_gen_reg(mw_channel, "gain")

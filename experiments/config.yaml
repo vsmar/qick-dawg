@@ -45,10 +45,10 @@ optics:
 # -----------------------------------------------------------------------------
 timing:
   laser_init_tus: 2
-  readout_integration_tns: 500
+  readout_integration_tns: 350
   mw_to_laser_delay_tns: 555
   laser_readout_offset_tus: 1.2
-  pulse_seq_delay_tus: 1
+  relax_delay_tus: 3
   pre_init: true
 
 
@@ -62,13 +62,13 @@ calibration:
   default_transition: lower_dip     # which transition build_nv_config() defaults to
 
   lower_dip:                        # ms = -1 transition
-    freq_fMHz: 1845.74
+    mw_fMHz: 1845.74
     mw_gain: 1800
-    pi_pulse_tns: 650              # set after Rabi calibration at this frequency
-    pi2_pulse_tns: 325
+    mw_pi_tdds: 650              # set after Rabi calibration at this frequency
+    mw_pi2_tdds: 325
 
   upper_dip:                        # ms = +1 transition
-    freq_fMHz: 3895.05
+    mw_fMHz: 3895.05
     mw_gain: 5000                   # may differ from lower_dip — recalibrate
-    pi_pulse_tns: null
-    pi2_pulse_tns: null
+    mw_pi_tdds: null
+    mw_pi2_tdds: null

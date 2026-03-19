@@ -103,12 +103,12 @@ class RabiSweep(NVAveragerProgram):
         '''
         self.check_cfg()
 
-        self.setup_readout()
+        # Get mw registers
+        self.declare_gen(ch=self.cfg.mw_channel, nqz=self.cfg.mw_nqz)
+        self.setup_helper_registers(self.cfg.mw_channel)
 
-        # configure pulse defaults and initial parameters for microwave
-        self.declare_gen(
-            ch=self.cfg.mw_channel,
-            nqz=self.cfg.mw_nqz)        
+        # Setup laser
+        self.setup_readout()    
 
         self.default_pulse_registers(
             ch=self.cfg.mw_channel,

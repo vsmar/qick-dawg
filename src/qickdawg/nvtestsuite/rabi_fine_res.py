@@ -18,24 +18,36 @@ class RabiFineRes(NVAveragerProgram, ReadoutHelpers):
     '''
     Rabi sub-nanosecond resolution pulsing program
     '''
-    required_cfg = [        
+    required_cfg = [      
+        # Channels and pmods
+        "mw_channel",
+        "adc_channel",
+        "laser_gate_pmod", # should be 0 for PMOD0_0
+
+        # MW pulse parameters
+        "mw_freg", # Microwave freq 
+        "mw_nqz", # 1 at 1405 MHz
+        "mw_gain", # MW Gain
+
+        # Sweep parameters
         "mw_duration_tdds_start",
         "mw_duration_tdds_end",
         "nsweep_points",
-        "mw_freg", # Microwave freq 
-        "mw_channel", # MW Channel
-        "mw_nqz", # 1 at 1405 MHz
-        "mw_gain", # MW Gain
-        "reps",
-        "laser_gate_pmod", # should be 0 for PMOD0_0
-        "relax_delay_treg", # delay between pulse seq end and trigger start of next seq
-        "adc_channel",
-        "laser_on_treg",
+
         # Readout and delays
+        "mw_to_laser_delay_treg", # How long do we need to delay the mw, to ensure the laser pulse is correctly timed before it
+        "relax_delay_treg", # delay between laser and next MW pulse
+
+        # Readout
+        "laser_on_treg",
+        "readout_reference_start_treg",
         "readout_integration_treg",
-        "mw_to_laser_delay_treg", # Positive 
         "laser_readout_offset_treg",
-        "get_reference",  # Whether to acquire a reference readout with MW gain = 0
+
+        # Other
+        "reps",
+        "pre_init",
+        "get_reference",  # Whether to acquire a reference readout with MW gain = 0  
     ]
 
     def initialize(self):
@@ -43,9 +55,10 @@ class RabiFineRes(NVAveragerProgram, ReadoutHelpers):
 
         # Get mw registers
         self.declare_gen(ch=self.cfg.mw_channel, nqz=self.cfg.mw_nqz)
+        self.setup_helper_registers(self.cfg.mw_channel)
 
-        # Setup readout validation and gain register
-        self.setup_readout_registers(self.cfg.mw_channel)
+        # Setup laser
+        self.setup_readout()
 
         # Get samps per clk for later calculations. should be 16 for mw with current version rfsoc 11/14/2025
         # if this changes from 16 then need to change waveform generation part
@@ -98,9 +111,6 @@ class RabiFineRes(NVAveragerProgram, ReadoutHelpers):
             self.trigger(ddr4=self.cfg.ddr4, mr=self.cfg.mr, adc_trig_offset=0)
         self.synci(100)
         
-        # Setup laser
-        self.setup_readout()
-
         self.pre_init() # Give tproc time to get ahead
 
     def body(self):

@@ -7,35 +7,45 @@ using fine control of waveform start address and phase.
 Modified from Tommy's RabiFineRes program. See his notebook for more details on the method.
 '''
 
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
+from itemattribute import ItemAttribute
 from qickdawg.util.apply_on_axis_0_n_times import apply_on_axis_0_n_times
 
 from qickdawg.nvpulsing.nvaverageprogram import NVAveragerProgram
 from qickdawg.nvpulsing.nvqicksweep import NVQickSweep
 from .readout_helpers import ReadoutHelpers
 import numpy as np
-from itemattribute import ItemAttribute
-
 
 class CountingDurationFineRes(NVAveragerProgram, ReadoutHelpers):
     '''
     Rabi sub-nanosecond resolution pulsing program
     '''
     required_cfg = [
+        # Channels and pmods
+        "mw_channel",
+        "adc_channel",
+        "laser_gate_pmod", # should be 0 for PMOD0_0
+
+        # MW pulse parameters
         "mw_pi_tdds", # length of mw
         "mw_freg", # Microwave freq 
-        "mw_channel", # MW Channel
         "mw_nqz", # 1 at 1405 MHz
         "mw_gain", # MW Gain
-        "reps",
-        "laser_gate_pmod", # should be 0 for PMOD0_0
-        "relax_delay_treg", # delay between pulse seq end and trigger start of next seq
 
         # Readout and delays
-        "adc_channel",
+        "mw_to_laser_delay_treg", # How long do we need to delay the mw, to ensure the laser pulse is correctly timed before it
+        "relax_delay_treg", # delay between laser and next MW pulse
+
+        # Readout
         "laser_on_treg",
+        "readout_reference_start_treg",
         "readout_integration_treg",
-        "mw_to_laser_delay_treg", # Positive 
         "laser_readout_offset_treg",
+
+        # Other
+        "reps",
+        "pre_init",
         "get_reference",  # Whether to acquire a reference readout with MW gain = 0
     ]
 
@@ -44,49 +54,39 @@ class CountingDurationFineRes(NVAveragerProgram, ReadoutHelpers):
 
         # Get mw registers
         self.declare_gen(ch=self.cfg.mw_channel, nqz=self.cfg.mw_nqz)
+        self.setup_helper_registers(self.cfg.mw_channel)
 
-        # Setup readout validation and gain register
-        self.setup_readout_registers(self.cfg.mw_channel)
+        # Setup laser
+        self.setup_readout()
 
-        # Get samps per clk for later calculations. should be 16 for mw with current version rfsoc 11/14/2025
-        # if this changes from 16 then need to change waveform generation part
+        # Get samps per clk for later calculations
         self.samps_per_clk = self.soccfg['gens'][self.cfg.mw_channel]['samps_per_clk']
-        # Configure the waveforms for different fine resolution pulse steps
-        # Waveforms must have at least a length of 3 treg units 
-        self.mw_pulse_waveform_len_treg = max(int(np.ceil(self.cfg.mw_duration_tdds / self.samps_per_clk)), 3)
-        self.mw_pulse_waveform_len_tdds = self.mw_pulse_waveform_len_treg * self.samps_per_clk  # in tdds units
-        
+        # Configure the waveforms for fine resolution pulse steps (must be >= 3 treg units)
+        self.mw_pulse_waveform_len_treg = max(int(np.ceil(self.cfg.mw_pi_tdds / self.samps_per_clk)), 3)
+        self.mw_pulse_waveform_len_tdds = self.mw_pulse_waveform_len_treg * self.samps_per_clk
+        # Create waveform with exact duration
         i_data = np.zeros(self.mw_pulse_waveform_len_tdds)
         q_data = np.zeros(self.mw_pulse_waveform_len_tdds)
-        i_data[:self.cfg.mw_duration_tdds] = 1
-        q_data[:self.cfg.mw_duration_tdds] = 1
+        i_data[:self.cfg.mw_pi_tdds] = 1
+        q_data[:self.cfg.mw_pi_tdds] = 1
         i_data *= self.soccfg.get_maxv(self.cfg.mw_channel)
         q_data *= self.soccfg.get_maxv(self.cfg.mw_channel)
         self.add_envelope(ch=self.cfg.mw_channel, name="pulse", idata=i_data, qdata=q_data)
-        
-        # mw pulse register
+        # MW pulse register
         self.default_pulse_registers(ch=self.cfg.mw_channel,
                                      style='arb',
                                      freq=self.cfg.mw_freg,
                                      gain=self.cfg.mw_gain,
                                      waveform="pulse",
-                                     phase = 0)
-            
+                                     phase=0)
+        # Explicitly arm the pulse
         self.set_pulse_registers(ch=self.cfg.mw_channel)
-
-        # Setup laser
-        self.setup_readout()
 
         self.pre_init()
 
     def body(self):
-        # Initialize
         self.laser_init()
-
-        # MW Pulse
         self.program_pulse()
-
-        # Readout with optional reference
         self.signal_and_reference_readout(self.program_pulse)
 
     def program_pulse(self):
@@ -96,8 +96,6 @@ class CountingDurationFineRes(NVAveragerProgram, ReadoutHelpers):
 
     # TODO: See to cleaning up acquire later
 
-    import matplotlib.pyplot as plt
-    import matplotlib.image as mpimg
     
     def acquire(self, raw_data=False, *arg, **kwarg):
 
