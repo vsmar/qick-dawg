@@ -13,7 +13,7 @@ import numpy as np
 from math import floor
 
 
-class SubnanoCPMGXY(NVAveragerProgram, ReadoutHelpers):
+class CPMGXYFineRes(NVAveragerProgram, ReadoutHelpers):
     '''
     An NVAveragerProgram class that generates RF gain and frequency stepping sequences.
     '''
@@ -168,12 +168,12 @@ class SubnanoCPMGXY(NVAveragerProgram, ReadoutHelpers):
         self.laser_init()
         
         # RF Pulse sequence (CPMG-XY)
-        self.program_pulses()
+        self.program_pulses(1)
         
         # Readout with optional reference
-        self.signal_and_reference_readout(self.program_pulses)
+        self.signal_and_reference_readout(lambda: self.program_pulses(2))
 
-    def program_pulses(self):
+    def program_pulses(self, iter):
         # This subtracts 1 tau from the 2 pulse delay that set_waveform will create
         self.math(self.tdds_offset_register.page, self.tdds_offset_register.addr, 
                       self.tdds_offset_register.addr, "-", self.tau_samples.addr)
@@ -189,7 +189,7 @@ class SubnanoCPMGXY(NVAveragerProgram, ReadoutHelpers):
         # LOOP: CPMG Pi Pulse
         # ---------------------------------------------------------------------------------------
         self.n_cpmg_register.reset()
-        self.label("LOOP_ncpmg") # Loop start point
+        self.label(f"LOOP_ncpmg_{iter}") # Loop start point
 
         # pi pulse
         self.set_pulse_registers(ch=self.cfg.mw_channel, waveform="pi_0", phase=0)
@@ -198,7 +198,7 @@ class SubnanoCPMGXY(NVAveragerProgram, ReadoutHelpers):
         self.sync_all() # Corrects time cursor bug
 
         # loop for all pi pulses 
-        self.loopnz(self.n_cpmg_register.page, self.n_cpmg_register.addr, 'LOOP_ncpmg')
+        self.loopnz(self.n_cpmg_register.page, self.n_cpmg_register.addr, f"LOOP_ncpmg_{iter}")
         # ---------------------------------------------------------------------------------------
         # End of Loop
         # ---------------------------------------------------------------------------------------

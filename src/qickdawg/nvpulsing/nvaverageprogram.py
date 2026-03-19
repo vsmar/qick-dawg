@@ -458,7 +458,7 @@ class NVAveragerProgram(QickRegisterManagerMixin, AcquireProgram):
             width=remaining_time,
             adc_trig_offset=0,
             t=self.cfg.readout_reference_start_treg + self.cfg.readout_integration_treg)
-
+        
         self.wait_all(remaining_time)
         self.sync_all(remaining_time + self.cfg.relax_delay_treg)
 

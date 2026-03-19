@@ -44,7 +44,7 @@ optics:
 # which handle _treg conversion internally.
 # -----------------------------------------------------------------------------
 timing:
-  laser_init_tus: 2
+  laser_init_tus: 5
   readout_integration_tns: 500
   mw_to_laser_delay_tns: 555
   laser_readout_offset_tus: 1.2

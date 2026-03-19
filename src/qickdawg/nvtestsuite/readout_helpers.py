@@ -1,7 +1,7 @@
 '''
 Helper class for shared laser initialization and readout sequences
 =======================================================================
-Provides common laser_init(), readout(), and acquisition/analysis methods
+Provides common laser_init(), NV readout, and acquisition/analysis methods
 for NV test suite programs.
 '''
 
@@ -15,40 +15,62 @@ class ReadoutHelpers:
     for NV pulse programs. Intended to be used with NVAveragerProgram subclasses.
     """
     
-    def check_laser_init_timing(self):
-        """Validate that laser initialization duration is sufficient"""
-        laser_init_duration = self.cfg.laser_init_treg - (self.cfg.laser_readout_offset_treg + self.cfg.readout_integration_treg)
-        if laser_init_duration <= 3:
-            raise ValueError(f"laser_init_treg ({self.cfg.laser_init_treg}) must be long enough so that "
-                           f"laser_init_treg - (laser_readout_offset_treg + readout_integration_treg) > 3. "
-                           f"Current calculated duration: {laser_init_duration}")
+    # def check_laser_init_timing(self):
+    #     """Validate that laser initialization duration is sufficient"""
+    #     laser_init_duration = self.cfg.laser_init_treg - (self.cfg.laser_readout_offset_treg + self.cfg.readout_integration_treg)
+    #     if laser_init_duration <= 3:
+    #         raise ValueError(f"laser_init_treg ({self.cfg.laser_init_treg}) must be long enough so that "
+    #                        f"laser_init_treg - (laser_readout_offset_treg + readout_integration_treg) > 3. "
+    #                        f"Current calculated duration: {laser_init_duration}")
     
     def setup_readout_registers(self, mw_channel):
         """Setup registers and validation for readout sequence"""
-        self.check_laser_init_timing()
+        # self.check_laser_init_timing()
         self.mw_gain_register = self.get_gen_reg(mw_channel, "gain")
-    
+
+        # Error if trigger would overflow
+        if self.cfg.laser_on_treg < self.cfg.readout_reference_start_treg + self.cfg.readout_integration_treg:
+            raise ValueError(
+                "Invalid readout timing: laser_on_treg must be >= "
+                "readout_reference_start_treg + readout_integration_treg. "
+                f"Got laser_on_treg={self.cfg.laser_on_treg}, "
+                f"readout_reference_start_treg={self.cfg.readout_reference_start_treg}, "
+                f"readout_integration_treg={self.cfg.readout_integration_treg}."
+            )
+
+
+    def pre_init(self):
+        """Pre-initialization pulse to bring system close to initialized state"""
+        if self.cfg.pre_init:
+            self.trigger(
+                pins=[self.cfg.laser_gate_pmod],
+                width=self.cfg.laser_on_treg, 
+                adc_trig_offset=0)
+            self.sync_all(self.cfg.laser_on_treg)
+
+        self.wait_all()
+        self.sync_all(self.cfg.relax_delay_treg)
+
     def laser_init(self):
         """Initialize spin state with laser pulse"""
-        laser_init_duration = self.cfg.laser_init_treg - (self.cfg.laser_readout_offset_treg + self.cfg.readout_integration_treg)
-        self.trigger(pins=[self.cfg.laser_gate_pmod], width=laser_init_duration)
-        self.wait_all(laser_init_duration)
-        self.sync_all(laser_init_duration + self.cfg.mw_to_laser_delay_treg)
+        self.sync_all(self.cfg.mw_to_laser_delay_treg)
 
-    def readout(self):
-        """Readout spin state with laser and ADC"""
+
+    def nv_readout(self):
+        """Readout spin state with laser and ADC."""
         # RO
-        self.trigger_no_off(  # Laser
-            pins=[self.cfg.laser_gate_pmod],
-            t=0)
-        self.trigger(  # Laser + ADC
-            adcs=self.cfg.adcs,
-            pins=[self.cfg.laser_gate_pmod],
-            adc_trig_offset=0,
-            width=self.cfg.readout_integration_treg,
-            t=self.cfg.laser_readout_offset_treg)
-        self.wait_all(self.cfg.readout_integration_treg)
-        self.sync_all(self.cfg.readout_integration_treg + self.cfg.pulse_seq_delay_treg)
+        # self.trigger_no_off(  # Laser
+        #     pins=[self.cfg.laser_gate_pmod],
+        #     t=0)
+        # self.trigger(  # Laser + ADC
+        #     adcs=self.cfg.adcs,
+        #     pins=[self.cfg.laser_gate_pmod],
+        #     adc_trig_offset=0,
+        #     width=self.cfg.readout_integration_treg,
+        #     t=self.cfg.laser_readout_offset_treg)
+        # self.wait_all(self.cfg.readout_integration_treg)
+        # self.sync_all(self.cfg.readout_integration_treg + self.cfg.pulse_seq_delay_treg)
+        self.ttl_readout()
 
     def signal_and_reference_readout(self, program_pulse_fn):
         """
@@ -64,7 +86,7 @@ class ReadoutHelpers:
             This is typically self.program_pulses() or equivalent.
         """
         # Signal readout (pulse was already applied in body)
-        self.readout()
+        self.nv_readout()
         
         # Reference readout (if configured)
         if self.cfg.get_reference:
@@ -72,21 +94,13 @@ class ReadoutHelpers:
             self.mw_gain_register.set_to(0, physical_unit=False)
             self.laser_init()
             program_pulse_fn()
-            self.readout()
+            self.nv_readout()
             # Restore original gain
             self.mw_gain_register.set_to(self.cfg.mw_gain, physical_unit=False)
 
-    def pre_init(self):
-        """Pre-initialization pulse to bring system close to initialized state"""
-        self.trigger(  # Laser
-            pins=[self.cfg.laser_gate_pmod],
-            adc_trig_offset=0,
-            width=self.cfg.readout_integration_treg + self.cfg.laser_readout_offset_treg,
-            t=0)
-        self.wait_all(self.cfg.readout_integration_treg + self.cfg.laser_readout_offset_treg)
-        self.sync_all(self.cfg.readout_integration_treg + self.cfg.laser_readout_offset_treg)
 
-    def acquire(self, raw_data=False, *arg, **kwarg):
+
+    def acquire2(self, raw_data=False, *arg, **kwarg):
         """
         Generic acquire method that handles reference readouts based on config.
         

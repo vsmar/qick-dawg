@@ -31,7 +31,7 @@ ODMR_START_MHZ  = 1840.0   # MHz
 ODMR_STOP_MHZ   = 1850.0   # MHz
 ODMR_DELTA_MHZ  = 0.1      # MHz  (step size)
 
-REPS            = 1
+REPS            = 100000
 
 # Transition — set to "lower_dip", "upper_dip", or None to use config.yaml default.
 # Swapping here also pulls in the correct freq_fMHz, mw_gain for that transition.
@@ -124,9 +124,9 @@ with h5py.File(out_path, "w") as f:
     exp.attrs["odmr_start_mhz"]     = ODMR_START_MHZ
     exp.attrs["odmr_stop_mhz"]      = ODMR_STOP_MHZ
     exp.attrs["odmr_delta_mhz"]     = ODMR_DELTA_MHZ
-    exp.attrs["odmr_start_freg"]    = config.mw_start_fMHz
-    exp.attrs["odmr_stop_freg"]     = config.mw_stop_fMHz
-    exp.attrs["odmr_delta_freg"]    = config.mw_delta_fMHz
+    exp.attrs["odmr_start_freg"]    = config.mw_start_freg
+    exp.attrs["odmr_end_freg"]      = config.mw_end_freg
+    exp.attrs["odmr_delta_freg"]    = config.mw_delta_freg
     exp.attrs["nsweep_points"]      = nsweep_points
     exp.attrs["mw_duration_ns"]     = mw_duration_ns
     exp.attrs["mw_duration_tdds"]   = config.mw_duration_tdds
@@ -204,21 +204,45 @@ def plot_dip_fit_and_annotate(axis, freq, signal):
         print(f"[podmr] Dip frequency (argmin): {mu:.6f} MHz (fit failed: {exc})")
         return mu
 
+data_squeezed = np.squeeze(np.asarray(data))
+
+# Handle acquisition output shapes:
+# - (N,) or (N,1): single signal (possibly after averaging)
+# - (2,N): signal and reference (already averaged)
+# - (reps, N): raw data from acquire() — average over reps
+# - (reps, 2, N): raw signal/reference — average both over reps
+reference = None
+
+if data_squeezed.ndim == 1:
+    signal = data_squeezed
+
+elif data_squeezed.ndim == 2 and data_squeezed.shape[0] == 2:
+    signal = data_squeezed[0]
+    reference = data_squeezed[1]
+
+elif data_squeezed.ndim == 2:
+    # Raw data shape (reps, nsweep_points) — average across reps
+    signal = np.mean(data_squeezed, axis=0)
+
+elif data_squeezed.ndim == 3 and data_squeezed.shape[1] == 2:
+    # Raw signal+reference shape (reps, 2, nsweep_points) — average across reps
+    signal = np.mean(data_squeezed[:, 0, :], axis=0)
+    reference = np.mean(data_squeezed[:, 1, :], axis=0)
+
+else:
+    raise ValueError(f"Unexpected data shape after squeeze: {data_squeezed.shape}")
+
 x_mhz = np.linspace(
     ODMR_START_MHZ,
     ODMR_STOP_MHZ,
-    nsweep_points,
+    signal.shape[0],
 )
 
 fig, ax = plt.subplots(figsize=(10, 5))
 
-# Plot signal and reference if available
-if len(data.shape) > 1 and data.shape[0] == 2:
-    # data has shape (2, nsweep_points) — signal and reference
-    signal = data[0]
-    reference = data[1]
+if reference is not None:
     contrast = signal / reference if np.all(reference > 0) else signal - reference
-    
+
     ax.plot(x_mhz, signal, marker="o", markersize=4, linewidth=1.5, label="Signal", color="tab:blue")
     ax.plot(x_mhz, reference, marker="s", markersize=4, linewidth=1.5, label="Reference", color="tab:orange")
     ax_contrast = ax.twinx()
@@ -226,10 +250,9 @@ if len(data.shape) > 1 and data.shape[0] == 2:
     ax_contrast.set_ylabel("Contrast (ratio or diff)", color="tab:green")
     plot_dip_fit_and_annotate(ax_contrast, x_mhz, contrast)
 else:
-    # data has shape (nsweep_points,) — signal only
-    ax.plot(x_mhz, data, marker="o", markersize=4, linewidth=1.5)
+    ax.plot(x_mhz, signal, marker="o", markersize=4, linewidth=1.5)
     ax.legend(["Signal"])
-    plot_dip_fit_and_annotate(ax, x_mhz, data)
+    plot_dip_fit_and_annotate(ax, x_mhz, signal)
 
 ax.set_xlabel("MW Frequency (MHz)")
 ax.set_ylabel("Signal (ADC counts)")

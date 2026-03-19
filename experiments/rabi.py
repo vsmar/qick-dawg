@@ -7,10 +7,7 @@ Edit the EXPERIMENT PARAMETERS block before each run.
 Everything else is pulled from config.yaml via config.py.
 """
 
-<<<<<<< HEAD
 from copy import copy
-=======
->>>>>>> 97d45ef1414acb8f1afa722f31298bbf46a5c75f
 from datetime import datetime
 from pathlib import Path
 
@@ -37,17 +34,12 @@ MW_DURATION_DELTA_NS = 5      # ns  (step size)
 REPS          = 1
 
 # Transition — set to "lower_dip", "upper_dip", or None to use config.yaml default.
-<<<<<<< HEAD
-# Swapping here also pulls in the correct freq_fMHz, mw_gain for that transition.
-TRANSITION    = None   # None = use calibration.default_transition
-=======
 TRANSITION    = None   # None = use calibration.default_transition
 
 # Optional per-run overrides. If left None, values come from transition calibration.
 OVERRIDE_FREQ_MHZ = None   # e.g. 1845.7
 OVERRIDE_MW_GAIN  = None   # e.g. 1800
 
->>>>>>> 97d45ef1414acb8f1afa722f31298bbf46a5c75f
 PULSE_SEQ_DELAY_TUS = 0.2     # us — overrides config.yaml default for Rabi
 GET_REFERENCE = True          # acquire reference readout with MW gain = 0
 
@@ -74,13 +66,6 @@ delta_tdds = ns_to_samples(MW_DURATION_DELTA_NS, soccfg, mw_ch)
 
 print(f"[rabi] Sweep: {start_tdds} → {stop_tdds} tdds  (Δ {delta_tdds})")
 
-<<<<<<< HEAD
-# Apply experiment-specific overrides
-if TRANSITION is not None:
-    t = cfg["calibration"][TRANSITION]
-    config.freq_fMHz = t["freq_fMHz"]
-    config.mw_gain   = t["mw_gain"]
-=======
 # Choose transition context: explicit TRANSITION, otherwise config default.
 active_transition = TRANSITION or cfg["calibration"]["default_transition"]
 t = cfg["calibration"][active_transition]
@@ -91,8 +76,6 @@ config.freq_fMHz = OVERRIDE_FREQ_MHZ if OVERRIDE_FREQ_MHZ is not None else t["fr
 config.mw_gain   = OVERRIDE_MW_GAIN  if OVERRIDE_MW_GAIN  is not None else t["mw_gain"]
 
 print(f"[rabi] Active transition: {active_transition} | freq={config.freq_fMHz} MHz | gain={config.mw_gain}")
-
->>>>>>> 97d45ef1414acb8f1afa722f31298bbf46a5c75f
 config.pulse_seq_delay_tus = PULSE_SEQ_DELAY_TUS
 config.reps                = REPS
 config.get_reference       = GET_REFERENCE
@@ -135,11 +118,7 @@ with h5py.File(out_path, "w") as f:
     exp.attrs["mw_duration_delta_tdds"] = delta_tdds
     exp.attrs["reps"]                  = REPS
     exp.attrs["freq_fMHz"]             = config.freq_fMHz
-<<<<<<< HEAD
-    exp.attrs["transition"]            = TRANSITION or cfg["calibration"]["default_transition"]
-=======
     exp.attrs["transition"]            = active_transition
->>>>>>> 97d45ef1414acb8f1afa722f31298bbf46a5c75f
     exp.attrs["pulse_seq_delay_tus"]   = PULSE_SEQ_DELAY_TUS
     exp.attrs["get_reference"]         = GET_REFERENCE
     exp.attrs["timestamp"]             = timestamp
@@ -150,14 +129,22 @@ print(f"[rabi] Saved → {out_path}")
 # Plot
 # =============================================================================
 
+# Squeeze data to remove singleton dimensions
+data_squeezed = np.squeeze(data)
+
+# Average over reps dimension if present (raw data from acquire)
+if data_squeezed.ndim == 2:
+    data_squeezed = np.mean(data_squeezed, axis=0)
+
+# Create x-axis matching the actual data length
 x_ns = np.arange(
     MW_DURATION_START_NS,
-    MW_DURATION_STOP_NS + MW_DURATION_DELTA_NS,
+    MW_DURATION_START_NS + data_squeezed.shape[0] * MW_DURATION_DELTA_NS,
     MW_DURATION_DELTA_NS,
 )
 
 fig, ax = plt.subplots(figsize=(8, 4))
-ax.plot(x_ns, data, marker="o", markersize=3, linewidth=1)
+ax.plot(x_ns, data_squeezed, marker="o", markersize=3, linewidth=1)
 ax.set_xlabel("MW Pulse Duration (ns)")
 ax.set_ylabel("Signal (ADC counts)")
 ax.set_title(

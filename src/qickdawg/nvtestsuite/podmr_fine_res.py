@@ -24,6 +24,8 @@ class PODMRFineRes(NVAveragerProgram, ReadoutHelpers):
         "mw_nqz",
         "mw_gain",
         "mw_duration_tdds",
+        "mw_start_fMHz",
+        "mw_end_fMHz",
         "mw_start_freg",
         "mw_end_freg",
         "nsweep_points",
@@ -44,6 +46,9 @@ class PODMRFineRes(NVAveragerProgram, ReadoutHelpers):
 
         # Get mw registers
         self.declare_gen(ch=self.cfg.mw_channel, nqz=self.cfg.mw_nqz)
+
+        # Setup helper-managed MW gain register used by reference readout path.
+        self.setup_readout_registers(self.cfg.mw_channel)
 
         # Get samps per clk for later calculations
         self.samps_per_clk = self.soccfg['gens'][self.cfg.mw_channel]['samps_per_clk']
@@ -68,13 +73,17 @@ class PODMRFineRes(NVAveragerProgram, ReadoutHelpers):
                                      gain=self.cfg.mw_gain,
                                      waveform="pulse",
                                      phase=0)
+
+        # Explicitly arm the first pulse for runtimes where defaults alone
+        # do not populate next_pulse before pulse() is called.
+        self.set_pulse_registers(ch=self.cfg.mw_channel)
         
         # Setup frequency sweep
         self.mw_frequency_register = self.get_gen_reg(self.cfg.mw_channel, "freq")
         self.add_sweep(QickSweep(self,
                                 self.mw_frequency_register,
-                                self.cfg.mw_start_freg,
-                                self.cfg.mw_end_freg,
+                                self.cfg.mw_start_fMHz,
+                                self.cfg.mw_end_fMHz,
                                 self.cfg.nsweep_points))
         
 
@@ -86,7 +95,7 @@ class PODMRFineRes(NVAveragerProgram, ReadoutHelpers):
         self.synci(200)  # Give tproc time to get ahead
         
         self.wait_all()
-        self.sync_all(self.cfg.relax_delay_treg)
+        self.sync_all(self.cfg.pulse_seq_delay_treg)
 
     def body(self):
         # Initialize

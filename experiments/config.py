@@ -14,7 +14,7 @@ Fine-resolution timing (_tdds / tsample):
     Stored in config.yaml as nanoseconds (human-readable).
     convert_fine_timing() converts to samples at runtime using:
 
-        duration_samples = duration_ns / (cycles2ns(1) / samps_per_clk)
+        duration_samples = duration_ns / ((soccfg.cycles2us(1) * 1000) / samps_per_clk)
 
     where samps_per_clk comes from the live soccfg after board connection.
     Call this after connect().
@@ -158,14 +158,12 @@ def convert_fine_timing(
 
     Conversion
     ----------
-    One clock cycle = cycles2ns(1) nanoseconds.
+    One clock cycle = soccfg.cycles2us(1) * 1000 nanoseconds.
     One clock cycle contains samps_per_clk waveform samples.
-    Therefore one sample = cycles2ns(1) / samps_per_clk  nanoseconds.
+    Therefore one sample = (soccfg.cycles2us(1) * 1000) / samps_per_clk nanoseconds.
 
-        samples = duration_ns / (cycles2ns(1) / samps_per_clk)
+        samples = duration_ns / ((soccfg.cycles2us(1) * 1000) / samps_per_clk)
     """
-    from qick.helpers import cycles2ns  # import here to avoid hard dep at module level
-
     # Read pi/pi2 pulse times from the active transition in calibration
     cal = cfg["calibration"]
     transition = cal[cal["default_transition"]]
@@ -175,7 +173,7 @@ def convert_fine_timing(
     }
 
     samps_per_clk = soccfg["gens"][mw_channel]["samps_per_clk"]
-    ns_per_sample = cycles2ns(1) / samps_per_clk
+    ns_per_sample = (soccfg.cycles2us(1) * 1000) / samps_per_clk
 
     result = {}
     for name, duration_ns in fine_ns.items():
@@ -221,7 +219,6 @@ def ns_to_samples(duration_ns: float, soccfg, mw_channel: int) -> int:
     -------
     int, duration in waveform samples (tdds)
     """
-    from qick.helpers import cycles2ns
     samps_per_clk = soccfg["gens"][mw_channel]["samps_per_clk"]
-    ns_per_sample = cycles2ns(1) / samps_per_clk
+    ns_per_sample = (soccfg.cycles2us(1) * 1000) / samps_per_clk
     return int(round(duration_ns / ns_per_sample))
