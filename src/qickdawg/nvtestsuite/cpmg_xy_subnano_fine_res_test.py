@@ -13,38 +13,43 @@ import numpy as np
 from math import floor
 
 
-class CPMGXYFineRes(NVAveragerProgram, ReadoutHelpers):
+class CPMGXYFineRes(ReadoutHelpers, NVAveragerProgram):
     '''
     An NVAveragerProgram class that generates RF gain and frequency stepping sequences.
     '''
     required_cfg = [
-        # MW Pulse Parameters
-        "mw_channel", # MW Channel
-        "mw_nqz", # 1 at 1405 MHz
-        "mw_freg", # MW FREQ (~1405 MHz for QDP)
-        "mw_gain", # MW Gain
-        "reps", # repetitions
-        
-        # Pulse Parameters
-        "pi2_len_samples", # length of pi/2 pulse
-        "n_cpmg", # number of pulses
-
-        # Delay Sweep Parameters
-        "tau_samples_start",
-        "tau_samples_end",
-        "nsweep_points",
-        
-        # Readout parameters
+        # Channels and pmods
+        "mw_channel",
         "adc_channel",
-        "laser_gate_pmod",
-        "laser_init_treg",
+        "laser_gate_pmod", # should be 0 for PMOD0_0
+
+        # MW pulse parameters
+        "mw_pi2_tdds", # length of pi/2 pulse
+        "mw_nqz", # 1 < 2.495 GHz
+        "mw_freg",
+        "mw_gain",
+        "n_cpmg",
+
+        # Delay Sweep parameters
+        "tau_tdds_start", # NOTE: this is a misnomer
+        "tau_tdds_end",
+        "nsweep_points",
+
+        # Readout and delays
+        "mw_to_laser_delay_treg", # How long do we need to delay the mw, to ensure the laser pulse is correctly timed before it
+        "relax_delay_treg", # delay between laser and next MW pulse
+
+        # Readout
+        "laser_on_treg",
+        "readout_reference_start_treg",
         "readout_integration_treg",
-        "mw_to_laser_delay_treg",
         "laser_readout_offset_treg",
-        "pulse_seq_delay_treg",
-        "get_reference",  # Whether to acquire a reference readout with MW gain = 0
-        "pre_init"  # Whether to use pre-initialization pulse
-        ]
+
+        # Other
+        "reps",
+        "pre_init",
+        "get_reference",  # Whether to acquire a reference readout with MW gain = 0  
+    ]
     
     def initialize(self):
         """
@@ -63,11 +68,9 @@ class CPMGXYFineRes(NVAveragerProgram, ReadoutHelpers):
 
         # Get mw registers
         self.declare_gen(ch=self.cfg.mw_channel, nqz=self.cfg.mw_nqz)
-        
-        # Setup readout validation and gain register
-        self.setup_readout_registers(self.cfg.mw_channel)
+        self.setup_helper_registers(self.cfg.mw_channel)
 
-        # Readout for QICK-DAWG
+        # Setup laser
         self.setup_readout()
 
         # Get samples per clock (16 with current version of QICK-DAWG)
@@ -78,27 +81,27 @@ class CPMGXYFineRes(NVAveragerProgram, ReadoutHelpers):
         # ---------------------
         # Waveforms must have at least a length of 3 treg
         self.pi_waveform_len_treg = \
-            max(int(np.ceil((self.cfg.pi2_len_samples*2 + (self.samps_per_clk-1)) / self.samps_per_clk)), 3)
+            max(int(np.ceil((self.cfg.mw_pi2_tdds*2 + (self.samps_per_clk-1)) / self.samps_per_clk)), 3)
         self.half_pi_waveform_len_treg = \
-            max(int(np.ceil((self.cfg.pi2_len_samples + (self.samps_per_clk-1)) / self.samps_per_clk)), 3)
+            max(int(np.ceil((self.cfg.mw_pi2_tdds + (self.samps_per_clk-1)) / self.samps_per_clk)), 3)
         
         # Generate waveforms with each offset
         for i in range(self.samps_per_clk):
             # pi pulses
             data = np.zeros(self.pi_waveform_len_treg * 16)
-            data[i: i + self.cfg.pi2_len_samples*2] = 1
+            data[i: i + self.cfg.mw_pi2_tdds*2] = 1
             data *= self.soccfg.get_maxv(self.cfg.mw_channel)
             self.add_envelope(ch=self.cfg.mw_channel, name=f"pi_{i}", idata=data, qdata=data)
 
             # half pi pulses
             data = np.zeros(self.half_pi_waveform_len_treg * 16)
-            data[i : i + self.cfg.pi2_len_samples] = 1
+            data[i : i + self.cfg.mw_pi2_tdds] = 1
             data *= self.soccfg.get_maxv(self.cfg.mw_channel)
             self.add_envelope(ch=self.cfg.mw_channel, name=f"half_pi_{i}", idata=data, qdata=data)
 
         # Amount of delay in the waveforms
-        self.pi_len_unused = self.pi_waveform_len_treg*16 - self.cfg.pi2_len_samples*2
-        self.half_pi_len_unused = self.half_pi_waveform_len_treg*16 - self.cfg.pi2_len_samples
+        self.pi_len_unused = self.pi_waveform_len_treg*16 - self.cfg.mw_pi2_tdds*2
+        self.half_pi_len_unused = self.half_pi_waveform_len_treg*16 - self.cfg.mw_pi2_tdds
         
         # Register to hold the FPGA/tproc delay between pulses
         self.treg_offset_register = self.new_gen_reg(self.cfg.mw_channel,
@@ -123,8 +126,8 @@ class CPMGXYFineRes(NVAveragerProgram, ReadoutHelpers):
                                      gain=self.cfg.mw_gain)
         
         # Setup Tau Sweep (tdds units, ie 200ps)
-        tau_start = self.cfg.tau_samples_start - self.pi_len_unused
-        tau_end = self.cfg.tau_samples_end - self.pi_len_unused
+        tau_start = self.cfg.tau_tdds_start - self.pi_len_unused
+        tau_end = self.cfg.tau_tdds_end - self.pi_len_unused
 
         self.tau_samples = self.new_gen_reg(self.cfg.mw_channel, "tau_samples", init_val=tau_start)
         self.add_sweep(QickSweep(self, self.tau_samples, tau_start, tau_end, self.cfg.nsweep_points))
@@ -138,15 +141,12 @@ class CPMGXYFineRes(NVAveragerProgram, ReadoutHelpers):
         # Setup register to store the pi-pulse phase sequence
         self.phase_to_list()
 
-        # Initializat first half_pi_pulse
-        self.set_pulse_registers(ch=self.cfg.mw_channel, waveform="half_pi_0", phase=0)
+        # Initializat first half_pi_pulse (Y)
+        self.set_pulse_registers(ch=self.cfg.mw_channel, waveform="half_pi_0", phase=self.deg2reg(90))
         
         # Pre-initialization
-        if self.cfg.pre_init:
-            self.pre_init()
+        self.pre_init()
         
-        self.synci(200)  # Give tproc time to get ahead
-
     def phase_to_list(self):
         """
         Default: XYXYYXYX = 0b10100101
@@ -164,13 +164,8 @@ class CPMGXYFineRes(NVAveragerProgram, ReadoutHelpers):
         """
         The full pulse sequence: laser init -> RF pulses -> readout
         """
-        # Initialize
-        self.laser_init()
-        
-        # RF Pulse sequence (CPMG-XY)
+        self.laser_init() # misnomer this just delays for mw_to_laser_delay_treg
         self.program_pulses(1)
-        
-        # Readout with optional reference
         self.signal_and_reference_readout(lambda: self.program_pulses(2))
 
     def program_pulses(self, iter):
@@ -205,12 +200,12 @@ class CPMGXYFineRes(NVAveragerProgram, ReadoutHelpers):
 
         # pi/2 X pulse
         self.set_pulse_registers(ch=self.cfg.mw_channel, waveform="half_pi_0", phase=0)
-        self.set_waveform(pi_pulse=False, phase=0)
+        self.set_waveform(pi_pulse=False, phase=270)
         self.pulse(ch=self.cfg.mw_channel)
         self.sync_all()
 
         # Reset for next loop
-        self.set_pulse_registers(ch=self.cfg.mw_channel, waveform="half_pi_0", phase=0)
+        self.set_pulse_registers(ch=self.cfg.mw_channel, waveform="half_pi_0", phase=self.deg2reg(90))
         self.tdds_offset_register.reset() # reset to initial value 
 
     def set_waveform(self, pi_pulse=True, phase=None):
@@ -291,6 +286,11 @@ class CPMGXYFineRes(NVAveragerProgram, ReadoutHelpers):
         # This is equivalent to: total delay (in samples) - fpga delay (in samples)
         self.bitwi(self.tdds_offset_register.page, self.tdds_offset_register.addr, 
                    self.tdds_offset_register.addr, "&", (self.samps_per_clk-1))
+        
+    def acquire(self, raw_data=False, *arg, **kwarg):
+        # self.acquire --> ReadoutHelpers.acquire --> NVAveragerProgram.acquire
+        data = super().acquire(raw_data=raw_data, sweep_param='tau_tdds', *arg, **kwarg)
+        return data
 
     def analyze_results(self, data):
         """

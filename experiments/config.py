@@ -11,33 +11,28 @@ Standard timing  (_tus, _tns, _fMHz):
     to _treg / _freg internally.
 
 Fine-resolution timing (_tdds / tsample):
-    Stored in config.yaml as nanoseconds (human-readable).
-    convert_fine_timing() converts to samples at runtime using:
-
-        duration_samples = duration_ns / ((soccfg.cycles2us(1) * 1000) / samps_per_clk)
-
-    where samps_per_clk comes from the live soccfg after board connection.
-    Call this after connect().
+    Stored in config.yaml directly as waveform sample counts.
 
 Typical usage
 -------------
-    from config import load_config, build_nv_config, connect, convert_fine_timing
+    from config import load_config, build_nv_config, connect
 
     cfg    = load_config()
-    soc, soccfg = connect(cfg)          # returns soc objects if qickdawg exposes them
+    connect(cfg)
     nv_cfg = build_nv_config(cfg)
-    fine   = convert_fine_timing(cfg, soccfg, nv_cfg.mw_channel)
-
-    # fine["pi_pulse"]  → duration in samples (tdds)
-    # fine["pi2_pulse"] → duration in samples (tdds)
 """
 
 import yaml
 from pathlib import Path
 from copy import copy
+import numpy as np
 import qickdawg as qd
 
-CONFIG_PATH = Path(__file__).parent / "config.yaml"
+# TODO: Once this is running well I'll just standardize the set-up and just have 1 path
+_ROOT = Path(__file__).resolve().parents[1]
+_PRIMARY_CONFIG_PATH = _ROOT / "config" / "config.yaml"
+_LEGACY_CONFIG_PATH = Path(__file__).parent / "config.yaml"
+CONFIG_PATH = _PRIMARY_CONFIG_PATH if _PRIMARY_CONFIG_PATH.exists() else _LEGACY_CONFIG_PATH
 
 
 # =============================================================================
@@ -56,17 +51,31 @@ def _validate(cfg: dict):
     """Raise early with a clear message if critical fields are missing or null."""
     errors = []
 
-    if cfg["optics"]["excitation_laser_power_mW"] is None:
-        errors.append(
-            "optics.excitation_laser_power_mW is null — "
-            "measure laser power and update config.yaml before running."
-        )
+    laser_power = cfg["optics"]["excitation_laser_power_mW"]
+    print(f"[config] Documented Excitation Power is {laser_power} mW, ensure this aligns with measured excitation power")
 
-    # Calibration values warn but don't block — Rabi establishes them.
     cal = cfg.get("calibration", {})
-    for key in ("pi_pulse_tns", "pi2_pulse_tns"):
-        if cal.get(key) is None:
-            print(f"[config] Warning: calibration.{key} is not set.")
+    transition_name = cal.get("default_transition")
+    if transition_name is None:
+        errors.append("calibration.default_transition is missing.")
+    elif transition_name not in cal:
+        errors.append(
+            f"calibration.default_transition='{transition_name}' does not exist under calibration."
+        )
+    else:
+        transition = cal[transition_name]
+        for key in ("mw_pi_tdds", "mw_pi2_tdds"):
+            if transition.get(key) is None:
+                print(f"[config] Warning: calibration.{transition_name}.{key} is not set.")
+
+    if "timing" not in cfg:
+        errors.append("timing section is missing.")
+
+    if "other" not in cfg:
+        print("[config] Warning: other section is missing; using defaults where possible.")
+
+    if "photon_counting" not in cfg:
+        print("[config] Warning: photon_counting section is missing; using defaults where possible.")
 
     if errors:
         raise ValueError("\n".join(errors))
@@ -95,111 +104,52 @@ def build_nv_config(cfg: dict) -> qd.NVConfiguration:
     Populate a qickdawg NVConfiguration from the loaded YAML dict.
     Standard timing params are assigned via human-unit setters;
     qickdawg handles _treg / _freg conversion internally.
-    Fine-resolution timing (_tdds) is NOT set here — call convert_fine_timing()
-    separately after connect(), as it requires the live soccfg.
+    Fine-resolution timing (_tdds) is read directly from calibration and assigned.
     """
     config = qd.NVConfiguration()
 
     hw = cfg["hardware"]
-    t  = cfg["timing"]
+    t = cfg["timing"]
+    o = cfg.get("other", {})
+    pc = cfg.get("photon_counting", {})
 
-    # Hardware
+    # Hardware / channels
     config.adc_channel      = hw["adc_channel"]
     config.mw_channel       = hw["mw_channel"]
-    config.mw_nqz           = hw["mw_nqz"]
     config.laser_gate_pmod  = hw["laser_gate_pmod"]
 
     # Microwave — defaults to calibration.default_transition (lower_dip or upper_dip)
     cal = cfg["calibration"]
     transition = cal[cal["default_transition"]]
-    config.freq_fMHz = transition["freq_fMHz"]
-    config.mw_gain   = transition["mw_gain"]
+    config.mw_fMHz    = transition["mw_fMHz"]
+    config.mw_nqz     = transition.get("mw_nqz", hw.get("mw_nqz", 1))
+    config.mw_gain    = transition["mw_gain"]
+    config.mw_pi_tdds = transition["mw_pi_tdds"]
+    config.mw_pi2_tdds = transition["mw_pi2_tdds"]
 
     # Standard timing (qickdawg converts to _treg internally)
-    config.laser_init_tus           = t["laser_init_tus"]
+    config.laser_on_tus             = t.get("laser_on_tus", t.get("laser_init_tus"))
     config.readout_integration_tns  = t["readout_integration_tns"]
     config.mw_to_laser_delay_tns    = t["mw_to_laser_delay_tns"]
     config.laser_readout_offset_tus = t["laser_readout_offset_tus"]
-    config.pulse_seq_delay_tus      = t["pulse_seq_delay_tus"]
-    config.pre_init                 = t["pre_init"]
+    config.readout_reference_start_tus = t.get("readout_reference_start_tus", 3.5)
+    config.relax_delay_tus          = t["relax_delay_tus"]
+
+    # Shared run controls
+    config.reps = o.get("reps", 100)
+    config.get_reference = o.get("get_reference", True)
+    config.pre_init = o.get("pre_init", t.get("pre_init", True))
+
+    # Photon counting controls
+    config.edge_counting = pc.get("edge_counting", True)
+    config.high_threshold = pc.get("high_threshold", 8000)
+    config.low_threshold = pc.get("low_threshold", 500)
 
     return config
 
 
 # =============================================================================
-# Fine-Resolution Timing Conversion  (ns → _tdds samples)
-# =============================================================================
-
-def convert_fine_timing(
-    cfg: dict,
-    soccfg,
-    mw_channel: int,
-) -> dict:
-    """
-    Convert pi_pulse_tns / pi2_pulse_tns from the active calibration transition
-    to waveform samples (_tdds).
-
-    Must be called after connect(), because samps_per_clk is read from the
-    live soccfg returned by the board.
-
-    Parameters
-    ----------
-    cfg        : dict loaded by load_config()
-    soccfg     : live soccfg object from qickdawg / QICK after connection
-    mw_channel : MW generator channel index (used to look up samps_per_clk)
-
-    Returns
-    -------
-    dict mapping parameter name → duration in samples (int)
-    e.g. {"pi_pulse": 400, "pi2_pulse": 200}
-
-    Reads from calibration[default_transition] by default. Pass transition="upper_dip"
-    to override.
-
-    Conversion
-    ----------
-    One clock cycle = soccfg.cycles2us(1) * 1000 nanoseconds.
-    One clock cycle contains samps_per_clk waveform samples.
-    Therefore one sample = (soccfg.cycles2us(1) * 1000) / samps_per_clk nanoseconds.
-
-        samples = duration_ns / ((soccfg.cycles2us(1) * 1000) / samps_per_clk)
-    """
-    # Read pi/pi2 pulse times from the active transition in calibration
-    cal = cfg["calibration"]
-    transition = cal[cal["default_transition"]]
-    fine_ns = {
-        "pi_pulse":  transition["pi_pulse_tns"],
-        "pi2_pulse": transition["pi2_pulse_tns"],
-    }
-
-    samps_per_clk = soccfg["gens"][mw_channel]["samps_per_clk"]
-    ns_per_sample = (soccfg.cycles2us(1) * 1000) / samps_per_clk
-
-    result = {}
-    for name, duration_ns in fine_ns.items():
-        if duration_ns is None:
-            print(f"[config] Warning: fine_timing_ns.{name} is not set (null).")
-            result[name] = None
-            continue
-
-        samples = duration_ns / ns_per_sample
-        samples_int = int(round(samples))
-
-        if abs(samples - samples_int) > 0.01:
-            print(
-                f"[config] Warning: fine_timing_ns.{name} = {duration_ns} ns "
-                f"does not land on an exact sample boundary "
-                f"({samples:.3f} samples). Rounded to {samples_int}."
-            )
-
-        result[name] = samples_int
-        print(f"[config] fine_timing: {name} = {duration_ns} ns → {samples_int} samples")
-
-    return result
-
-
-# =============================================================================
-# Convenience: ns_to_samples  (for one-off conversions in experiment scripts)
+# Helper functions
 # =============================================================================
 
 def ns_to_samples(duration_ns: float, soccfg, mw_channel: int) -> int:
@@ -222,3 +172,123 @@ def ns_to_samples(duration_ns: float, soccfg, mw_channel: int) -> int:
     samps_per_clk = soccfg["gens"][mw_channel]["samps_per_clk"]
     ns_per_sample = (soccfg.cycles2us(1) * 1000) / samps_per_clk
     return int(round(duration_ns / ns_per_sample))
+
+
+def get_ns_per_sample(soccfg, mw_channel: int) -> float:
+    """Return waveform sample duration (ns) for the selected generator channel."""
+    samps_per_clk = soccfg["gens"][mw_channel]["samps_per_clk"]
+    return (soccfg.cycles2us(1) * 1000) / samps_per_clk
+
+
+def set_hdf5_attr(group, key: str, value):
+    """Set HDF5 attr while skipping None values."""
+    if value is not None:
+        group.attrs[key] = value
+
+
+def write_hdf5_attrs(group, attrs: dict):
+    """Write dict entries as HDF5 attributes, skipping None values."""
+    for key, value in attrs.items():
+        set_hdf5_attr(group, key, value)
+
+
+def collect_required_cfg_attrs(cfg_obj, required_keys) -> dict:
+    """Collect required_cfg values from NVConfiguration when present."""
+    attrs = {}
+    for key in required_keys:
+        if hasattr(cfg_obj, key):
+            attrs[key] = getattr(cfg_obj, key)
+    return attrs
+
+
+def add_unit_pair_expansions(attrs: dict, cfg_obj, ns_per_sample: float) -> dict:
+    """Add paired unit forms (treg<->tns/tus, freg<->fMHz, tdds->ns)."""
+    expanded = dict(attrs)
+
+    for key, value in list(attrs.items()):
+        if key.endswith("_treg"):
+            stem = key[:-5]
+            for alt in (f"{stem}_tns", f"{stem}_tus"):
+                if alt not in expanded and hasattr(cfg_obj, alt):
+                    expanded[alt] = getattr(cfg_obj, alt)
+
+        if key.endswith("_freg"):
+            alt = f"{key[:-5]}_fMHz"
+            if alt not in expanded and hasattr(cfg_obj, alt):
+                expanded[alt] = getattr(cfg_obj, alt)
+
+        if key.endswith("_fMHz"):
+            alt = f"{key[:-5]}_freg"
+            if alt not in expanded and hasattr(cfg_obj, alt):
+                expanded[alt] = getattr(cfg_obj, alt)
+
+        if "_tdds" in key and np.isscalar(value):
+            ns_key = key.replace("_tdds", "_ns")
+            if ns_key not in expanded:
+                expanded[ns_key] = float(value) * ns_per_sample
+
+    return expanded
+
+
+def save_experiment_hdf5(
+    program_class,
+    config_obj,
+    cfg_dict: dict,
+    data,
+    output_dir: Path,
+    experiment_name: str,
+    ns_per_sample: float,
+    custom_attrs: dict = None,
+) -> tuple[Path, str]:
+    """
+    Save experiment data and metadata using the standard project HDF5 layout.
+
+    Returns
+    -------
+    (Path, str)
+        Saved file path and timestamp string used in the filename/metadata.
+    """
+    from datetime import datetime
+    import h5py
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_path = output_dir / f"{experiment_name}_{timestamp}.h5"
+
+    with h5py.File(out_path, "w") as f:
+        if hasattr(data, "keys"):
+            data_group = f.create_group("data")
+            for key in data.keys():
+                data_group.create_dataset(key, data=np.asarray(data[key]))
+        else:
+            f.create_dataset("data", data=np.asarray(data))
+
+        config_yaml = yaml.dump(cfg_dict, sort_keys=False)
+        f.attrs["config_yaml_full"] = config_yaml
+        f.attrs["config_yaml"] = config_yaml
+
+        required_attrs = collect_required_cfg_attrs(config_obj, program_class.required_cfg)
+        required_attrs = add_unit_pair_expansions(required_attrs, config_obj, ns_per_sample)
+
+        experiment_attrs = {"timestamp": timestamp}
+        experiment_attrs.update(required_attrs)
+        if custom_attrs:
+            experiment_attrs.update(custom_attrs)
+
+        exp = f.create_group("experiment")
+        write_hdf5_attrs(exp, experiment_attrs)
+
+        resolved_attrs = dict(experiment_attrs)
+        resolved_attrs["experiment_name"] = experiment_name
+        resolved_attrs["excitation_laser_power_mW"] = cfg_dict.get("optics", {}).get("excitation_laser_power_mW")
+
+        sample_cfg = cfg_dict.get("sample", {})
+        resolved_attrs["sample_id"] = sample_cfg.get("sample_id")
+        resolved_attrs["sil_id"] = sample_cfg.get("sil_id")
+        resolved_attrs["sample_notes"] = sample_cfg.get("notes")
+
+        resolved = f.create_group("resolved_config")
+        write_hdf5_attrs(resolved, resolved_attrs)
+
+    return out_path, timestamp

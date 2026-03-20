@@ -7,6 +7,7 @@ for NV test suite programs.
 
 import numpy as np
 from itemattribute import ItemAttribute
+from qickdawg.util.apply_on_axis_0_n_times import apply_on_axis_0_n_times
 
 
 class ReadoutHelpers:
@@ -27,6 +28,7 @@ class ReadoutHelpers:
         """Setup registers and validation for readout sequence"""
         # self.check_laser_init_timing()
         self.mw_gain_register = self.get_gen_reg(mw_channel, "gain")
+        # self.mw_frequency_register = self.get_gen_reg(mw_channel, "fMHz")
 
         # Error if trigger would overflow
         if self.cfg.laser_on_treg < self.cfg.readout_reference_start_treg + self.cfg.readout_integration_treg:
@@ -100,7 +102,7 @@ class ReadoutHelpers:
 
 
 
-    def acquire2(self, raw_data=False, *arg, **kwarg):
+    def acquire(self, raw_data=False, sweep_param=None, *arg, **kwarg):
         """
         Generic acquire method that handles reference readouts based on config.
         
@@ -113,54 +115,68 @@ class ReadoutHelpers:
         -------
         Analyzed or raw data depending on raw_data flag
         """
-        readouts = 2 if self.cfg.get_reference else 1
+        readouts = 4 if self.cfg.get_reference else 2
+
         data = super().acquire(readouts_per_experiment=readouts, *arg, **kwarg)
         if not raw_data:
-            data = self.analyze_results(data)
+            data = self.analyze_results_helper(data, sweep_param=sweep_param)
         return data
 
-    def analyze_results(self, data):
+    def analyze_results_helper(self, data, sweep_param=None):
         """
-        Generic analysis for experiments with signal and optional reference readouts.
-        
-        Handles both swept and non-swept experiments. For swept experiments, subclasses
-        should override to add the appropriate sweep axis (e.g., duration, frequencies).
-        
+        Method that takes in a 1D array of data points from self.acquire() and analyzes the
+        results based on the number of reps and frequency points
+
         Parameters
         ----------
         data
-            (1D or multi-D np.array) data returned from acquire()
-        
-        Returns
-        -------
-        ItemAttribute with signal, optional reference, contrast, and optional sweep_pts
+            (1D np.array) data returned from self.acquire()
+
+        returns
+            (qickdawg.ItemAttribute instance) with attributes
+            .frequencies (len(nsweep_points) np array, MHz units) - frequencies swept over
+            .signal (nfrequency np.array, adc units)
+                - average adc signal with MW pulse
+            .reference (nfrequency np.array, adc units)
+                - signal at the end of the reinitialization pulse
+            .contrast (nfrequency np.array, fractional units)
+                - (signal - reference) / reference
         """
         data = np.reshape(data, self.data_shape)
+        
         d = ItemAttribute()
+
+        norm_factor = self.cfg.readout_integration_tns * 1e-9 * self.cfg.reps
+
+        d.signal1 = data[..., 0]
+        d.reference1 = data[..., 1]
+
+        if self.cfg.get_reference:
+             d.signal2 = data[..., 2]
+             d.reference2 = data[..., 3]
+
+        # Average over all axes except the last (sweep param) axis
+        n = len(d.signal1.shape) - 1
         
-        norm_factor = self.cfg.readout_integration_treg * self.cfg.reps
-        
-        if data.ndim == 0:
-            # Scalar case (single readout, no sweep)
-            d.signal = data.item() / norm_factor
-        else:
-            # Array case - extract signal (first readout)
-            d.signal = data[..., 0]
-            n = len(d.signal.shape) - 1
-            from ..util import apply_on_axis_0_n_times
-            d.signal = apply_on_axis_0_n_times(d.signal, np.sum, n)
-            d.signal_cts_s = d.signal / norm_factor
-            
-            # Extract and process reference if available
-            if self.cfg.get_reference and data.shape[-1] > 1:
-                d.reference = data[..., 1]
-                d.reference = apply_on_axis_0_n_times(d.reference, np.sum, n)
-                d.reference_cts_s = d.reference / norm_factor
-                d.contrast = d.signal_cts_s / d.reference_cts_s
-                # maybe rename to signal/reference since contrast can mean something different
-        
+        measurement_keys = ['signal1', 'reference1']
+        if self.cfg.get_reference:
+            measurement_keys += ['signal2', 'reference2']
+
+        for key in measurement_keys:
+            # Sum over all reps for each measurement
+            d[key] = apply_on_axis_0_n_times(d[key], np.sum, n)
+            # Generate cts/s versions of each key
+            d[key + '_cts_s'] = d[key] / norm_factor
+
+        # Calculate signal/reference
+        if self.cfg.get_reference:
+            d.contrast = d.signal1 / d.signal2
+
         # Add sweep points if available (subclass should override to rename as appropriate)
         if hasattr(self, 'qick_sweeps') and len(self.qick_sweeps) > 0:
-            d.sweep_pts = self.qick_sweeps[0].get_sweep_pts()
+            if sweep_param is not None:
+                d[sweep_param] = self.qick_sweeps[0].get_sweep_pts()
+            else:
+                d.sweep_pts = self.qick_sweeps[0].get_sweep_pts()
         
         return d

@@ -183,7 +183,7 @@ class NVConfiguration(ItemAttribute):
 
         self.__setattr__(name + '_start_' + unit, start)
 
-        if (delta != 0) & (nsweep_points == 0):
+        if (delta != 0) and (nsweep_points == 0):
 
             self.__setattr__(name + '_delta_' + unit, delta)
             self.nsweep_points = int(
@@ -195,7 +195,7 @@ class NVConfiguration(ItemAttribute):
                 + self[name + '_delta_' + runit]
                 * (self.nsweep_points - 1)))
 
-        elif (delta == 0) & (nsweep_points != 0):
+        elif (delta == 0) and (nsweep_points != 0):
 
             self.nsweep_points = nsweep_points
             self.__setattr__(name + '_delta_' + ounit, int(
@@ -221,8 +221,11 @@ class NVConfiguration(ItemAttribute):
 
     def add_unitless_linear_sweep(self, name, start, stop, delta=0, nsweep_points=0):
 
-        for var in [start, stop, delta]:
-            assert isinstance(var, int), "Unitless linear sweep requires integer start, stop, delta" 
+        assert np.sum(np.array([delta, nsweep_points]) > 0) == 1, 'Either delta and nsweep_points are required, but not both'
+        assert isinstance(start, int) and isinstance(stop, int), "Unitless linear sweep requires integer start and stop"
+        assert isinstance(nsweep_points, int), "nsweep_points must be an int"
+        if delta != 0:
+            assert isinstance(delta, int), "Unitless linear sweep requires integer delta"
 
         start_name = name + '_start'
         end_name = name + '_end'
@@ -230,17 +233,18 @@ class NVConfiguration(ItemAttribute):
 
         self[start_name] = start
 
-        if (delta != 0) & (nsweep_points == 0):
-            self[delta_name] = delta        
+        if (delta != 0) and (nsweep_points == 0):
+            self[delta_name] = delta
             self.nsweep_points = int(floor((stop - start) / delta + 1))
-            self[end_name] = (start + delta * self.nsweep_points)
+            self[end_name] = (start + delta * (self.nsweep_points - 1))
 
-        elif (delta == 0) & (nsweep_points == 0):
+        elif (delta == 0) and (nsweep_points != 0):
+            assert nsweep_points > 1, "nsweep_points must be > 1 when delta is not provided"
             self.nsweep_points = nsweep_points
             self[delta_name] = int(floor((stop - start) / (nsweep_points - 1)))
-            self[end_name] = (start + delta * self.nsweep_points)
+            self[end_name] = (start + self[delta_name] * (self.nsweep_points - 1))
 
-        if (self[start_name] + self[delta_name] * self.nsweep_points) != stop:
+        if self[end_name] != stop:
             print('Warning: exact sweep condition not possible\n')
             if delta == 0:
                 print(f'Requested {start} to {stop} in {nsweep_points}')

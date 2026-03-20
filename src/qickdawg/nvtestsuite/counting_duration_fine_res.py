@@ -17,6 +17,8 @@ from qickdawg.nvpulsing.nvqicksweep import NVQickSweep
 from .readout_helpers import ReadoutHelpers
 import numpy as np
 
+# NVAveragerProgram first as this class should only use the
+# Use the default acquire method from NVAveragerProgram, when acquire.super() is called
 class CountingDurationFineRes(NVAveragerProgram, ReadoutHelpers):
     '''
     Rabi sub-nanosecond resolution pulsing program
@@ -140,6 +142,10 @@ class CountingDurationFineRes(NVAveragerProgram, ReadoutHelpers):
         d.reference2 = apply_on_axis_0_n_times(d.reference2.astype(ret_type), func, n)
 
         d.contrast = apply_on_axis_0_n_times(d.contrast.astype(ret_type), func, n)
+
+        norm_factor = self.cfg.readout_integration_tns * 1e-9 * self.cfg.reps
+        for key in ['signal1', 'reference1', 'signal2', 'reference2']:
+            d[key + '_cts_s'] = d[key] / norm_factor
 
         return d
 

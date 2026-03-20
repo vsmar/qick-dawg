@@ -16,7 +16,7 @@ from qick.averager_program import QickSweep
 import numpy as np
 
 
-class PODMRFineRes(NVAveragerProgram, ReadoutHelpers):
+class PODMRFineRes(ReadoutHelpers, NVAveragerProgram):
     '''
     Pulsed-ODMR with fine resolution pulse control.
     Sweeps microwave frequency while applying MW pulses with fine resolution control.
@@ -106,13 +106,9 @@ class PODMRFineRes(NVAveragerProgram, ReadoutHelpers):
         self.pulse(ch=self.cfg.mw_channel)
         self.sync_all()
     
-
     def acquire(self, raw_data=False, *arg, **kwarg):
-        data = super().acquire(readouts_per_experiment=4, *arg, **kwarg)
-
-        if raw_data is False:
-            data = self.analyze_results(data)
-
+        # self.acquire --> ReadoutHelpers.acquire --> NVAveragerProgram.acquire
+        data = super().acquire(raw_data=raw_data, sweep_param='mw_fMHz', *arg, **kwarg)
         return data
 
     def analyze_results(self, data):

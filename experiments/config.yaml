@@ -11,11 +11,19 @@
 
 
 # -----------------------------------------------------------------------------
+# Sample Being Observed
+# -----------------------------------------------------------------------------
+sample:
+  name: "Minion"
+  SIL: "D_o"
+
+
+# -----------------------------------------------------------------------------
 # Infrastructure
 # -----------------------------------------------------------------------------
 infrastructure:
   qick_ip: "192.168.3.1"
-  qickdawg_version: "0.1.0"
+  qickdawg_version: "1.2.1"
   numpy_version: "1.26.4"
 
 
@@ -23,18 +31,24 @@ infrastructure:
 # Hardware / Channel Mapping
 # -----------------------------------------------------------------------------
 hardware:
-  adc_channel: 0
-  mw_channel: 0
-  mw_nqz: 1
-  laser_gate_pmod: 0
+  adc_channel: 0      # DAC B
+  mw_channel: 0       # ADC D
+  laser_gate_pmod: 0  # PMOD 0
 
+# -----------------------------------------------------------------------------
+# Photon Counting
+# -----------------------------------------------------------------------------
+photon_counting:
+   edge_counting: true
+   high_threshold: 8000
+   low_threshold: 500
 
 # -----------------------------------------------------------------------------
 # Optics
 # Update before each run series.
 # -----------------------------------------------------------------------------
 optics:
-  excitation_laser_power_mW: 0.302    # REQUIRED — measure and update before running
+  excitation_laser_power_mW: 0.320    # REQUIRED — measure and update before running
   excitation_laser_wavelength_nm: 532
 
 
@@ -44,11 +58,20 @@ optics:
 # which handle _treg conversion internally.
 # -----------------------------------------------------------------------------
 timing:
-  laser_init_tus: 2
-  readout_integration_tns: 350
+  relax_delay_tus: 2
   mw_to_laser_delay_tns: 555
-  laser_readout_offset_tus: 1.2
-  relax_delay_tus: 3
+  laser_on_tus: 4
+  readout_integration_tns: 340
+  laser_readout_offset_tus: 1.08
+  readout_reference_start_tus: 3.5
+
+
+# -----------------------------------------------------------------------------
+# Other parameters used in shaping runs
+# -----------------------------------------------------------------------------
+other:
+  reps: 10000
+  get_reference: true
   pre_init: true
 
 
@@ -62,13 +85,16 @@ calibration:
   default_transition: lower_dip     # which transition build_nv_config() defaults to
 
   lower_dip:                        # ms = -1 transition
-    mw_fMHz: 1845.74
-    mw_gain: 1800
-    mw_pi_tdds: 650              # set after Rabi calibration at this frequency
-    mw_pi2_tdds: 325
+    mw_fMHz: 1846
+    mw_nqz: 1
+    mw_gain: 32767                # 32767 is max
+    mw_pi2_tdds: 130
+    mw_pi_tdds: 260              # set after Rabi calibration at this frequency
+
 
   upper_dip:                        # ms = +1 transition
     mw_fMHz: 3895.05
+    mw_nqz: 2                       # lower NQZ cutoff is 2.495 GHz
     mw_gain: 5000                   # may differ from lower_dip — recalibrate
     mw_pi_tdds: null
     mw_pi2_tdds: null

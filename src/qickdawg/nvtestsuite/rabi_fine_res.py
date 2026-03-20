@@ -13,8 +13,11 @@ from .readout_helpers import ReadoutHelpers
 import numpy as np
 
 
-
-class RabiFineRes(NVAveragerProgram, ReadoutHelpers):
+# Readout Helper needs to be first parent class so that acquire 
+# first resolves to ReadoutHelpers.acquire which handles reference readouts 
+# based on config before calling NVAveragerProgram.acquire to get the data and 
+# then analyze it with ReadoutHelpers.analyze_results_helper
+class RabiFineRes(ReadoutHelpers, NVAveragerProgram):
     '''
     Rabi sub-nanosecond resolution pulsing program
     '''
@@ -141,12 +144,8 @@ class RabiFineRes(NVAveragerProgram, ReadoutHelpers):
         self.sync_all()
 
     def acquire(self, raw_data=False, *arg, **kwarg):
-
-        data = super().acquire(readouts_per_experiment=4, *arg, **kwarg)
-
-        if raw_data is False:
-            data = self.analyze_pulse_sequence(data)
-
+        # self.acquire --> ReadoutHelpers.acquire --> NVAveragerProgram.acquire
+        data = super().acquire(raw_data=raw_data, sweep_param='mw_duration_tdds', *arg, **kwarg)
         return data
 
     def plot_sequence(cfg=None):
