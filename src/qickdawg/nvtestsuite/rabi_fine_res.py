@@ -33,8 +33,8 @@ class RabiFineRes(ReadoutHelpers, NVAveragerProgram):
         "mw_gain", # MW Gain
 
         # Sweep parameters
-        "mw_duration_tdds_start",
-        "mw_duration_tdds_end",
+        "mw_duration_start_ftsamp",
+        "mw_duration_end_ftsamp",
         "nsweep_points",
 
         # Readout and delays
@@ -69,11 +69,11 @@ class RabiFineRes(ReadoutHelpers, NVAveragerProgram):
         # Configure the waveforms for different fine resolution pulse steps
         # Waveforms must have at least a length of 3 treg units but want multiple of 2 so use 4 so 4*16= 64 = 2^6 for 16 samps per clk
         self.mw_pulse_waveform_len_treg = 4
-        self.mw_pulse_waveform_len_tdds = self.mw_pulse_waveform_len_treg * self.samps_per_clk  # in tdds units
+        self.mw_pulse_waveform_len_ftsamp = self.mw_pulse_waveform_len_treg * self.samps_per_clk  # in ftsamp units
         
-        for i in np.arange(0, self.mw_pulse_waveform_len_tdds+1, 1):
-            i_data = np.zeros(self.mw_pulse_waveform_len_tdds)
-            q_data = np.zeros(self.mw_pulse_waveform_len_tdds)
+        for i in np.arange(0, self.mw_pulse_waveform_len_ftsamp+1, 1):
+            i_data = np.zeros(self.mw_pulse_waveform_len_ftsamp)
+            q_data = np.zeros(self.mw_pulse_waveform_len_ftsamp)
             i_data[:i] = 1
             q_data[:i] = 1
             i_data *= self.soccfg.get_maxv(self.cfg.mw_channel)
@@ -93,7 +93,7 @@ class RabiFineRes(ReadoutHelpers, NVAveragerProgram):
         # mw duration register
         self.mw_duration_register = self.new_gen_reg(self.cfg.mw_channel,
                                                    name='mw_duration',
-                                                   init_val=self.cfg.mw_duration_tdds_start)
+                                                   init_val=self.cfg.mw_duration_start_ftsamp)
 
         # mw coarse and fine pulse loop register
         self.coarse_mw_register = self.new_gen_reg(self.cfg.mw_channel,
@@ -105,8 +105,8 @@ class RabiFineRes(ReadoutHelpers, NVAveragerProgram):
 
         self.add_sweep(NVQickSweep(self,
                                    reg=self.mw_duration_register,
-                                   start=self.cfg.mw_duration_tdds_start,
-                                   stop=self.cfg.mw_duration_tdds_end,
+                                   start=self.cfg.mw_duration_start_ftsamp,
+                                   stop=self.cfg.mw_duration_end_ftsamp,
                                    expts=self.cfg.nsweep_points))
         
         self.synci(100)  # give processor some time to configure pulses
@@ -123,16 +123,16 @@ class RabiFineRes(ReadoutHelpers, NVAveragerProgram):
 
     def program_pulses(self, num):
         # set coarse and fine registers based on duration. coarse is x//64 and then multiply by 4 to get treg units
-        self.bitwi(self.coarse_mw_register.page, self.coarse_mw_register.addr, self.mw_duration_register.addr, ">>", int(np.log2(self.mw_pulse_waveform_len_tdds)))
+        self.bitwi(self.coarse_mw_register.page, self.coarse_mw_register.addr, self.mw_duration_register.addr, ">>", int(np.log2(self.mw_pulse_waveform_len_ftsamp)))
         self.bitwi(self.coarse_mw_register.page, self.coarse_mw_register.addr, self.coarse_mw_register.addr, "<<", int(np.log2(self.mw_pulse_waveform_len_treg)))
-        self.bitwi(self.fine_mw_register.page, self.fine_mw_register.addr, self.mw_duration_register.addr, "&", self.mw_pulse_waveform_len_tdds - 1)
+        self.bitwi(self.fine_mw_register.page, self.fine_mw_register.addr, self.mw_duration_register.addr, "&", self.mw_pulse_waveform_len_ftsamp - 1)
         
         # if there is no coarse part just do fine part
         self.condj(self.coarse_mw_register.page, self.coarse_mw_register.addr, "==", 0, f"JUMP_NO_COARSE_{num}")
 
         # since using sync all (and need to use it for accurate timing), it will always play a pulse so need to subtract onewaveform length
         self.coarse_mw_register.set_to(self.coarse_mw_register, "-", self.mw_pulse_waveform_len_treg, physical_unit=False)
-        self.set_pulse_registers(ch=self.cfg.mw_channel, waveform=f"pulse_{self.mw_pulse_waveform_len_tdds}", mode = "periodic")
+        self.set_pulse_registers(ch=self.cfg.mw_channel, waveform=f"pulse_{self.mw_pulse_waveform_len_ftsamp}", mode = "periodic")
         self.pulse(ch=self.cfg.mw_channel) 
         self.sync_all()
         self.sync(self.coarse_mw_register.page, self.coarse_mw_register.addr)
@@ -145,7 +145,7 @@ class RabiFineRes(ReadoutHelpers, NVAveragerProgram):
 
     def acquire(self, raw_data=False, *arg, **kwarg):
         # self.acquire --> ReadoutHelpers.acquire --> NVAveragerProgram.acquire
-        data = super().acquire(raw_data=raw_data, sweep_param='mw_duration_tdds', *arg, **kwarg)
+        data = super().acquire(raw_data=raw_data, sweep_param='mw_duration_ftsamp', *arg, **kwarg)
         return data
 
     def plot_sequence(cfg=None):
@@ -187,9 +187,9 @@ class RabiFineRes(ReadoutHelpers, NVAveragerProgram):
             plt.text(420, 510, "Repeat {} times".format(cfg.reps), fontsize=14)
             plt.text(350, 440, "laser_on_tus = {} us".format(str(cfg.laser_on_tus)[:4]), fontsize=14)
 
-            string = f"Sweep pi/2 pulse time linearly from {int(cfg.mw_duration_tdds_start)} samples"
-            string += f" to {int(cfg.mw_duration_tdds_end)} samples in steps of "
-            string += f"{str(cfg.mw_duration_tdds_delta)[:4]} samples"
+            string = f"Sweep pi/2 pulse time linearly from {int(cfg.mw_duration_start_ftsamp)} samples"
+            string += f" to {int(cfg.mw_duration_end_ftsamp)} samples in steps of "
+            string += f"{str(cfg.mw_duration_delta_ftsamp)[:4]} samples"
             plt.text(195, 580, string, fontsize=12)
 
             plt.text(265, 370, "readout_integration  \n       = {} ns".format(
@@ -202,3 +202,4 @@ class RabiFineRes(ReadoutHelpers, NVAveragerProgram):
             plt.text(430, 407, "readout_reference_start = {} us".format(
                 int(cfg.readout_reference_start_tus)), fontsize=14)
             plt.title("           Rabi Oscillation Pulse Sequence", fontsize=20)
+

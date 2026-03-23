@@ -10,7 +10,7 @@ Standard timing  (_tus, _tns, _fMHz):
     Assigned directly via qickdawg human-unit setters → qickdawg converts
     to _treg / _freg internally.
 
-Fine-resolution timing (_tdds / tsample):
+Fine-resolution timing (_ftsamp):
     Stored in config.yaml directly as waveform sample counts.
 
 Typical usage
@@ -24,7 +24,6 @@ Typical usage
 
 import yaml
 from pathlib import Path
-from copy import copy
 import numpy as np
 import qickdawg as qd
 
@@ -64,7 +63,7 @@ def _validate(cfg: dict):
         )
     else:
         transition = cal[transition_name]
-        for key in ("mw_pi_tdds", "mw_pi2_tdds"):
+        for key in ("mw_pi_ftsamp", "mw_pi2_ftsamp"):
             if transition.get(key) is None:
                 print(f"[config] Warning: calibration.{transition_name}.{key} is not set.")
 
@@ -104,7 +103,7 @@ def build_nv_config(cfg: dict) -> qd.NVConfiguration:
     Populate a qickdawg NVConfiguration from the loaded YAML dict.
     Standard timing params are assigned via human-unit setters;
     qickdawg handles _treg / _freg conversion internally.
-    Fine-resolution timing (_tdds) is read directly from calibration and assigned.
+    Fine-resolution timing (_ftsamp) is read directly from calibration and assigned.
     """
     config = qd.NVConfiguration()
 
@@ -124,8 +123,8 @@ def build_nv_config(cfg: dict) -> qd.NVConfiguration:
     config.mw_fMHz    = transition["mw_fMHz"]
     config.mw_nqz     = transition.get("mw_nqz", hw.get("mw_nqz", 1))
     config.mw_gain    = transition["mw_gain"]
-    config.mw_pi_tdds = transition["mw_pi_tdds"]
-    config.mw_pi2_tdds = transition["mw_pi2_tdds"]
+    config.mw_pi_ftsamp = transition["mw_pi_ftsamp"]
+    config.mw_pi2_ftsamp = transition["mw_pi2_ftsamp"]
 
     # Standard timing (qickdawg converts to _treg internally)
     config.laser_on_tus             = t.get("laser_on_tus", t.get("laser_init_tus"))
@@ -146,38 +145,6 @@ def build_nv_config(cfg: dict) -> qd.NVConfiguration:
     config.low_threshold = pc.get("low_threshold", 500)
 
     return config
-
-
-# =============================================================================
-# Helper functions
-# =============================================================================
-
-def ns_to_samples(duration_ns: float, soccfg, mw_channel: int) -> int:
-    """Convert a single duration in ns to waveform samples (_tdds units).
-    
-    Used for pulse durations and fine-resolution timing that need to be in
-    waveform sample units (not register units). NVConfiguration handles
-    automatic conversion for human units like fMHz, fGHz, tus, tns.
-    
-    Parameters
-    ----------
-    duration_ns    : float, duration in nanoseconds
-    soccfg         : live soccfg object from qickdawg / QICK after connection
-    mw_channel     : MW generator channel index
-    
-    Returns
-    -------
-    int, duration in waveform samples (tdds)
-    """
-    samps_per_clk = soccfg["gens"][mw_channel]["samps_per_clk"]
-    ns_per_sample = (soccfg.cycles2us(1) * 1000) / samps_per_clk
-    return int(round(duration_ns / ns_per_sample))
-
-
-def get_ns_per_sample(soccfg, mw_channel: int) -> float:
-    """Return waveform sample duration (ns) for the selected generator channel."""
-    samps_per_clk = soccfg["gens"][mw_channel]["samps_per_clk"]
-    return (soccfg.cycles2us(1) * 1000) / samps_per_clk
 
 
 def set_hdf5_attr(group, key: str, value):
@@ -201,8 +168,8 @@ def collect_required_cfg_attrs(cfg_obj, required_keys) -> dict:
     return attrs
 
 
-def add_unit_pair_expansions(attrs: dict, cfg_obj, ns_per_sample: float) -> dict:
-    """Add paired unit forms (treg<->tns/tus, freg<->fMHz, tdds->ns)."""
+def add_unit_pair_expansions(attrs: dict, cfg_obj) -> dict:
+    """Add paired unit forms (treg<->tns/tus, freg<->fMHz, ftsamp<->ftns/ftus)."""
     expanded = dict(attrs)
 
     for key, value in list(attrs.items()):
@@ -213,19 +180,34 @@ def add_unit_pair_expansions(attrs: dict, cfg_obj, ns_per_sample: float) -> dict
                     expanded[alt] = getattr(cfg_obj, alt)
 
         if key.endswith("_freg"):
-            alt = f"{key[:-5]}_fMHz"
-            if alt not in expanded and hasattr(cfg_obj, alt):
-                expanded[alt] = getattr(cfg_obj, alt)
+            stem = key[:-5]
+            for alt in (f"{stem}_fMHz"):
+                if alt not in expanded and hasattr(cfg_obj, alt):
+                    expanded[alt] = getattr(cfg_obj, alt)
 
         if key.endswith("_fMHz"):
-            alt = f"{key[:-5]}_freg"
-            if alt not in expanded and hasattr(cfg_obj, alt):
-                expanded[alt] = getattr(cfg_obj, alt)
+            stem = key[:-5]
+            for alt in (f"{stem}_freg", f"{stem}_fGHz"):
+                if alt not in expanded and hasattr(cfg_obj, alt):
+                    expanded[alt] = getattr(cfg_obj, alt)
 
-        if "_tdds" in key and np.isscalar(value):
-            ns_key = key.replace("_tdds", "_ns")
-            if ns_key not in expanded:
-                expanded[ns_key] = float(value) * ns_per_sample
+        if key.endswith("_ftsamp"):
+            stem = key[:-7]
+            for alt in (f"{stem}_ftns", f"{stem}_ftus"):
+                if alt not in expanded and hasattr(cfg_obj, alt):
+                    expanded[alt] = getattr(cfg_obj, alt)
+
+        if key.endswith("_ftns"):
+            stem = key[:-5]
+            for alt in (f"{stem}_ftsamp", f"{stem}_ftus"):
+                if alt not in expanded and hasattr(cfg_obj, alt):
+                    expanded[alt] = getattr(cfg_obj, alt)
+
+        if key.endswith("_ftus"):
+            stem = key[:-5]
+            for alt in (f"{stem}_ftsamp", f"{stem}_ftns"):
+                if alt not in expanded and hasattr(cfg_obj, alt):
+                    expanded[alt] = getattr(cfg_obj, alt)
 
     return expanded
 
@@ -237,7 +219,6 @@ def save_experiment_hdf5(
     data,
     output_dir: Path,
     experiment_name: str,
-    ns_per_sample: float,
     custom_attrs: dict = None,
 ) -> tuple[Path, str]:
     """
@@ -248,19 +229,30 @@ def save_experiment_hdf5(
     (Path, str)
         Saved file path and timestamp string used in the filename/metadata.
     """
-    from datetime import datetime
+    from datetime import UTC, datetime
     import h5py
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_path = output_dir / f"{experiment_name}_{timestamp}.h5"
+    local_dt = datetime.now().astimezone()
+    utc_dt = datetime.now(UTC)
+
+    timestamp_local = local_dt.strftime("%Y%m%d_%H%M%S")
+    timestamp_utc = utc_dt.strftime("%Y%m%d_%H%M%S")
+    out_path = output_dir / f"{experiment_name}_{timestamp_local}.h5"
 
     with h5py.File(out_path, "w") as f:
         if hasattr(data, "keys"):
             data_group = f.create_group("data")
             for key in data.keys():
-                data_group.create_dataset(key, data=np.asarray(data[key]))
+                value = data[key]
+                arr = np.asarray(value)
+                try:
+                    data_group.create_dataset(key, data=arr)
+                except TypeError:
+                    # Some analyzed fields are non-numeric (e.g., string labels such as sweep_param).
+                    # Persist them as attrs so saves never fail on dtype conversion.
+                    data_group.attrs[key] = str(value)
         else:
             f.create_dataset("data", data=np.asarray(data))
 
@@ -269,13 +261,19 @@ def save_experiment_hdf5(
         f.attrs["config_yaml"] = config_yaml
 
         required_attrs = collect_required_cfg_attrs(config_obj, program_class.required_cfg)
-        required_attrs = add_unit_pair_expansions(required_attrs, config_obj, ns_per_sample)
+        required_attrs = add_unit_pair_expansions(required_attrs, config_obj)
 
-        experiment_attrs = {"timestamp": timestamp}
+        experiment_attrs = {}
         experiment_attrs.update(required_attrs)
         if custom_attrs:
             experiment_attrs.update(custom_attrs)
 
+        # Canonical metadata keys set last so custom_attrs cannot override them.
+        experiment_attrs["timestamp"] = timestamp_local
+        experiment_attrs["timestamp_local"] = timestamp_local
+        experiment_attrs["timestamp_utc"] = timestamp_utc
+        experiment_attrs["timestamp_local_iso"] = local_dt.isoformat(timespec="seconds")
+        experiment_attrs["timestamp_utc_iso"] = utc_dt.isoformat(timespec="seconds")
         exp = f.create_group("experiment")
         write_hdf5_attrs(exp, experiment_attrs)
 
@@ -291,4 +289,4 @@ def save_experiment_hdf5(
         resolved = f.create_group("resolved_config")
         write_hdf5_attrs(resolved, resolved_attrs)
 
-    return out_path, timestamp
+    return out_path, timestamp_local

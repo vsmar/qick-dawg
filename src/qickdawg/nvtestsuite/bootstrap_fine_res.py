@@ -28,8 +28,8 @@ class BootstrapFineRes(NVAveragerProgram, ReadoutHelpers):
         "mw_gain", # MW Gain
 
         # Bootstrap specific parameters
-        "mw_pi2_tdds",
-        "btwn_mw_delay_tdds", # delay between mw pulses
+        "mw_pi2_ftsamp",
+        "btwn_mw_delay_ftsamp", # delay between mw pulses
         "bootstrap_experiment_number",
 
         # Readout and delays
@@ -59,21 +59,21 @@ class BootstrapFineRes(NVAveragerProgram, ReadoutHelpers):
         # Configure the waveforms for different fine resolution pulse steps
         # Waveforms must have at least a length of 3 treg units 
         if self.cfg.bootstrap_experiment_number in [1,2]:
-            self.mw_pulse_seq_len_tdds = self.cfg.mw_pi2_tdds 
+            self.mw_pulse_seq_len_ftsamp = self.cfg.mw_pi2_ftsamp 
         elif self.cfg.bootstrap_experiment_number in [3,4,5,6]:
-            self.mw_pulse_seq_len_tdds = 3*self.cfg.mw_pi2_tdds + self.cfg.btwn_mw_delay_tdds
+            self.mw_pulse_seq_len_ftsamp = 3*self.cfg.mw_pi2_ftsamp + self.cfg.btwn_mw_delay_ftsamp
         elif self.cfg.bootstrap_experiment_number in [7,8]:
-            self.mw_pulse_seq_len_tdds = 2*self.cfg.mw_pi2_tdds + self.cfg.btwn_mw_delay_tdds
+            self.mw_pulse_seq_len_ftsamp = 2*self.cfg.mw_pi2_ftsamp + self.cfg.btwn_mw_delay_ftsamp
         elif self.cfg.bootstrap_experiment_number in [9,10,11,12]:
-            self.mw_pulse_seq_len_tdds = 4*self.cfg.mw_pi2_tdds + 2*self.cfg.btwn_mw_delay_tdds
-        self.mw_pulse_waveform_len_treg = max(int(np.ceil(self.mw_pulse_seq_len_tdds / self.samps_per_clk)), 3)
-        self.mw_pulse_waveform_len_tdds = self.mw_pulse_waveform_len_treg * self.samps_per_clk  
+            self.mw_pulse_seq_len_ftsamp = 4*self.cfg.mw_pi2_ftsamp + 2*self.cfg.btwn_mw_delay_ftsamp
+        self.mw_pulse_waveform_len_treg = max(int(np.ceil(self.mw_pulse_seq_len_ftsamp / self.samps_per_clk)), 3)
+        self.mw_pulse_waveform_len_ftsamp = self.mw_pulse_waveform_len_treg * self.samps_per_clk  
         
-        i_data = np.zeros(self.mw_pulse_waveform_len_tdds)
-        q_data = np.zeros(self.mw_pulse_waveform_len_tdds)
+        i_data = np.zeros(self.mw_pulse_waveform_len_ftsamp)
+        q_data = np.zeros(self.mw_pulse_waveform_len_ftsamp)
 
         axis = {"x": (1, 1), "y": (-1, 1)}
-        pulse_type = {"pi2": self.cfg.mw_pi2_tdds, "pi": 2 * self.cfg.mw_pi2_tdds}
+        pulse_type = {"pi2": self.cfg.mw_pi2_ftsamp, "pi": 2 * self.cfg.mw_pi2_ftsamp}
         seqs = {
             1: [("pi2", "x")],
             2: [("pi2", "y")],
@@ -93,7 +93,7 @@ class BootstrapFineRes(NVAveragerProgram, ReadoutHelpers):
         idx = 0
         for typ, ax in seqs[self.cfg.bootstrap_experiment_number]:
             if typ == "delay":
-                idx += self.cfg.btwn_mw_delay_tdds
+                idx += self.cfg.btwn_mw_delay_ftsamp
                 continue
             length = pulse_type[typ]
             i_val, q_val = axis[ax]
@@ -190,3 +190,4 @@ class BootstrapFineRes(NVAveragerProgram, ReadoutHelpers):
             d[key + '_cts_s'] = d[key] / norm_factor
 
         return d
+

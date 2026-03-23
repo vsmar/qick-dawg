@@ -5,8 +5,8 @@ Subnanosecond CPMG-XY Test class used to test the shape of RF envelopes.
 Implements full experiment with laser initialization and readout.
 '''
 
-from qick.averager_program import QickSweep
 from ..nvpulsing.nvaverageprogram import NVAveragerProgram
+from ..nvpulsing.nvqicksweep import NVQickSweep
 from .readout_helpers import ReadoutHelpers
 
 import numpy as np
@@ -24,15 +24,15 @@ class CPMGXYFineRes(ReadoutHelpers, NVAveragerProgram):
         "laser_gate_pmod", # should be 0 for PMOD0_0
 
         # MW pulse parameters
-        "mw_pi2_tdds", # length of pi/2 pulse
+        "mw_pi2_ftsamp", # length of pi/2 pulse
         "mw_nqz", # 1 < 2.495 GHz
         "mw_freg",
         "mw_gain",
         "n_cpmg",
 
         # Delay Sweep parameters
-        "tau_tdds_start", # NOTE: this is a misnomer
-        "tau_tdds_end",
+        "tau_start_ftsamp",
+        "tau_end_ftsamp",
         "nsweep_points",
 
         # Readout and delays
@@ -81,37 +81,37 @@ class CPMGXYFineRes(ReadoutHelpers, NVAveragerProgram):
         # ---------------------
         # Waveforms must have at least a length of 3 treg
         self.pi_waveform_len_treg = \
-            max(int(np.ceil((self.cfg.mw_pi2_tdds*2 + (self.samps_per_clk-1)) / self.samps_per_clk)), 3)
+            max(int(np.ceil((self.cfg.mw_pi2_ftsamp*2 + (self.samps_per_clk-1)) / self.samps_per_clk)), 3)
         self.half_pi_waveform_len_treg = \
-            max(int(np.ceil((self.cfg.mw_pi2_tdds + (self.samps_per_clk-1)) / self.samps_per_clk)), 3)
+            max(int(np.ceil((self.cfg.mw_pi2_ftsamp + (self.samps_per_clk-1)) / self.samps_per_clk)), 3)
         
         # Generate waveforms with each offset
         for i in range(self.samps_per_clk):
             # pi pulses
             data = np.zeros(self.pi_waveform_len_treg * 16)
-            data[i: i + self.cfg.mw_pi2_tdds*2] = 1
+            data[i: i + self.cfg.mw_pi2_ftsamp*2] = 1
             data *= self.soccfg.get_maxv(self.cfg.mw_channel)
             self.add_envelope(ch=self.cfg.mw_channel, name=f"pi_{i}", idata=data, qdata=data)
 
             # half pi pulses
             data = np.zeros(self.half_pi_waveform_len_treg * 16)
-            data[i : i + self.cfg.mw_pi2_tdds] = 1
+            data[i : i + self.cfg.mw_pi2_ftsamp] = 1
             data *= self.soccfg.get_maxv(self.cfg.mw_channel)
             self.add_envelope(ch=self.cfg.mw_channel, name=f"half_pi_{i}", idata=data, qdata=data)
 
         # Amount of delay in the waveforms
-        self.pi_len_unused = self.pi_waveform_len_treg*16 - self.cfg.mw_pi2_tdds*2
-        self.half_pi_len_unused = self.half_pi_waveform_len_treg*16 - self.cfg.mw_pi2_tdds
+        self.pi_len_unused = self.pi_waveform_len_treg*16 - self.cfg.mw_pi2_ftsamp*2
+        self.half_pi_len_unused = self.half_pi_waveform_len_treg*16 - self.cfg.mw_pi2_ftsamp
         
         # Register to hold the FPGA/tproc delay between pulses
         self.treg_offset_register = self.new_gen_reg(self.cfg.mw_channel,
                                                 name='treg_offset',
                                                 init_val=0)
 
-        # Initialize tdds_offset_register to account for the first half_pi_pulse
+        # Initialize ftsamp_offset_register to account for the first half_pi_pulse
         # (ie, difference in delay in a half pi vs a pi waveform)
-        self.tdds_offset_register = self.new_gen_reg(self.cfg.mw_channel,
-                                                    name='tdds_offset',
+        self.ftsamp_offset_register = self.new_gen_reg(self.cfg.mw_channel,
+                                                    name='ftsamp_offset',
                                                     init_val=(self.pi_len_unused-self.half_pi_len_unused))
         
         # Number of pi pulses
@@ -125,12 +125,12 @@ class CPMGXYFineRes(ReadoutHelpers, NVAveragerProgram):
                                      freq=self.cfg.mw_freg,
                                      gain=self.cfg.mw_gain)
         
-        # Setup Tau Sweep (tdds units, ie 200ps)
-        tau_start = self.cfg.tau_tdds_start - self.pi_len_unused
-        tau_end = self.cfg.tau_tdds_end - self.pi_len_unused
+        # Setup Tau Sweep (ftsamp units, ie 200ps)
+        tau_start = self.cfg.tau_start_ftsamp - self.pi_len_unused
+        tau_end = self.cfg.tau_end_ftsamp - self.pi_len_unused
 
         self.tau_samples = self.new_gen_reg(self.cfg.mw_channel, "tau_samples", init_val=tau_start)
-        self.add_sweep(QickSweep(self, self.tau_samples, tau_start, tau_end, self.cfg.nsweep_points))
+        self.add_sweep(NVQickSweep(self, self.tau_samples, tau_start, tau_end, self.cfg.nsweep_points))
         
         # waveform address register
         self.address_register = self.get_gen_reg(self.cfg.mw_channel, name='addr')
@@ -157,7 +157,7 @@ class CPMGXYFineRes(ReadoutHelpers, NVAveragerProgram):
         """
         self.phase_list = ["X", "Y", "X", "Y", "Y", "X", "Y", "X"]
         phase_seq = int(''.join(['0' if val == 'X' else '1' for val in np.flip(self.phase_list)]), 2)
-        print(str(bin(phase_seq)))
+        # print(str(bin(phase_seq)))
         self.phase_seq_register = self.new_gen_reg(self.cfg.mw_channel, "phase_seq_register", init_val=phase_seq)
 
     def body(self):
@@ -170,10 +170,10 @@ class CPMGXYFineRes(ReadoutHelpers, NVAveragerProgram):
 
     def program_pulses(self, iter):
         # This subtracts 1 tau from the 2 pulse delay that set_waveform will create
-        self.math(self.tdds_offset_register.page, self.tdds_offset_register.addr, 
-                      self.tdds_offset_register.addr, "-", self.tau_samples.addr)
-        self.mathi(self.tdds_offset_register.page, self.tdds_offset_register.addr, 
-                      self.tdds_offset_register.addr, "+", self.pi_len_unused)
+        self.math(self.ftsamp_offset_register.page, self.ftsamp_offset_register.addr, 
+                      self.ftsamp_offset_register.addr, "-", self.tau_samples.addr)
+        self.mathi(self.ftsamp_offset_register.page, self.ftsamp_offset_register.addr, 
+                      self.ftsamp_offset_register.addr, "+", self.pi_len_unused)
         self.sync_all()
 
         # Pi/2 X pulse
@@ -206,7 +206,7 @@ class CPMGXYFineRes(ReadoutHelpers, NVAveragerProgram):
 
         # Reset for next loop
         self.set_pulse_registers(ch=self.cfg.mw_channel, waveform="half_pi_0", phase=self.deg2reg(90))
-        self.tdds_offset_register.reset() # reset to initial value 
+        self.ftsamp_offset_register.reset() # reset to initial value 
 
     def set_waveform(self, pi_pulse=True, phase=None):
         """
@@ -223,7 +223,7 @@ class CPMGXYFineRes(ReadoutHelpers, NVAveragerProgram):
         self.sync(self.treg_offset_register.page, self.treg_offset_register.addr) 
 
         # Update the address register to correspond to the correct waveform
-        self.address_register.set_to(self.tdds_offset_register, '*', 
+        self.address_register.set_to(self.ftsamp_offset_register, '*', 
                                      self.pi_waveform_len_treg+self.half_pi_waveform_len_treg, physical_unit = False)
         if not pi_pulse: # pi/2 Waveforms are stored after pi waveforms
             self.address_register.set_to(self.address_register, '+', 
@@ -254,7 +254,7 @@ class CPMGXYFineRes(ReadoutHelpers, NVAveragerProgram):
 
     def offset_computations(self, double_tau=False):
         """
-        Compute the tdds_offset_register and treg_offset_register for the next pulse. 
+        Compute the ftsamp_offset_register and treg_offset_register for the next pulse. 
         Computes: 
         1. wait till the start of the next pulse (from the end of the previous waveform) (in sample timing resolution 200ps)
         2. Amount of wait done on the FPGA (converting to treg, ie dividing by 16 and taking the floor)
@@ -264,44 +264,31 @@ class CPMGXYFineRes(ReadoutHelpers, NVAveragerProgram):
             Actual Tau (samples) - Pi Pulse Waveform unused (samples)
             $$$ This is done to account for the delay in the pi pulse waveform itself
         """
-        # tdds_offset_register = tdds_offset_register + sample_step
+        # ftsamp_offset_register = ftsamp_offset_register + sample_step
         # Computes the total delay needed until the next pulse from the end of this waveform
         # by adding amount of samples to wait + current sample offset
-        self.math(self.tdds_offset_register.page, self.tdds_offset_register.addr, 
-                  self.tdds_offset_register.addr, "+", self.tau_samples.addr)
+        self.math(self.ftsamp_offset_register.page, self.ftsamp_offset_register.addr, 
+                  self.ftsamp_offset_register.addr, "+", self.tau_samples.addr)
         if double_tau: # Add another tau of delay (= 2*tau)
-            self.math(self.tdds_offset_register.page, self.tdds_offset_register.addr, 
-                      self.tdds_offset_register.addr, "+", self.tau_samples.addr)
+            self.math(self.ftsamp_offset_register.page, self.ftsamp_offset_register.addr, 
+                      self.ftsamp_offset_register.addr, "+", self.tau_samples.addr)
             # avoid double counting the pi pulse delay
-            self.mathi(self.tdds_offset_register.page, self.tdds_offset_register.addr, 
-                      self.tdds_offset_register.addr, "-", self.pi_len_unused)
-        # treg_offset_register = tdds_offset_register >> 4 (global offset)
+            self.mathi(self.ftsamp_offset_register.page, self.ftsamp_offset_register.addr, 
+                      self.ftsamp_offset_register.addr, "-", self.pi_len_unused)
+        # treg_offset_register = ftsamp_offset_register >> 4 (global offset)
         # Computes how long to stall the FPGA output in tproc cycles
         # from the total delay.
         # This operation also converts from samples (200ps) to treg (3.2ns)
-        self.bitwi(self.tdds_offset_register.page, self.treg_offset_register.addr, 
-                   self.tdds_offset_register.addr, ">>", int(np.log2(self.samps_per_clk)))
-        # tdds_offset_register = tdds_offset_register & 15
+        self.bitwi(self.ftsamp_offset_register.page, self.treg_offset_register.addr, 
+                   self.ftsamp_offset_register.addr, ">>", int(np.log2(self.samps_per_clk)))
+        # ftsamp_offset_register = ftsamp_offset_register & 15
         # Computes the remaining samples that the pulse should be delayed by
         # This is equivalent to: total delay (in samples) - fpga delay (in samples)
-        self.bitwi(self.tdds_offset_register.page, self.tdds_offset_register.addr, 
-                   self.tdds_offset_register.addr, "&", (self.samps_per_clk-1))
+        self.bitwi(self.ftsamp_offset_register.page, self.ftsamp_offset_register.addr, 
+                   self.ftsamp_offset_register.addr, "&", (self.samps_per_clk-1))
         
     def acquire(self, raw_data=False, *arg, **kwarg):
         # self.acquire --> ReadoutHelpers.acquire --> NVAveragerProgram.acquire
-        data = super().acquire(raw_data=raw_data, sweep_param='tau_tdds', *arg, **kwarg)
+        data = super().acquire(raw_data=raw_data, sweep_param='tau_ftsamp', *arg, **kwarg)
         return data
 
-    def analyze_results(self, data):
-        """
-        Analyze CPMG-XY sweep results, renaming sweep_pts to tau_samples.
-        Uses parent helper's analysis for signal/reference/contrast extraction.
-        
-        Returns ItemAttribute with: signal, reference (opt), contrast (opt), tau_samples
-        """
-        d = super().analyze_results(data)
-        # Rename sweep_pts to tau_samples for clarity
-        if hasattr(d, 'sweep_pts'):
-            d.tau_samples = d.sweep_pts
-            del d.sweep_pts
-        return d

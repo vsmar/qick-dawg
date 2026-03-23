@@ -30,7 +30,7 @@ class CountingDurationFineRes(NVAveragerProgram, ReadoutHelpers):
         "laser_gate_pmod", # should be 0 for PMOD0_0
 
         # MW pulse parameters
-        "mw_pi_tdds", # length of mw
+        "mw_pi_ftsamp", # length of mw
         "mw_freg", # Microwave freq 
         "mw_nqz", # 1 at 1405 MHz
         "mw_gain", # MW Gain
@@ -64,13 +64,13 @@ class CountingDurationFineRes(NVAveragerProgram, ReadoutHelpers):
         # Get samps per clk for later calculations
         self.samps_per_clk = self.soccfg['gens'][self.cfg.mw_channel]['samps_per_clk']
         # Configure the waveforms for fine resolution pulse steps (must be >= 3 treg units)
-        self.mw_pulse_waveform_len_treg = max(int(np.ceil(self.cfg.mw_pi_tdds / self.samps_per_clk)), 3)
-        self.mw_pulse_waveform_len_tdds = self.mw_pulse_waveform_len_treg * self.samps_per_clk
+        self.mw_pulse_waveform_len_treg = max(int(np.ceil(self.cfg.mw_pi_ftsamp / self.samps_per_clk)), 3)
+        self.mw_pulse_waveform_len_ftsamp = self.mw_pulse_waveform_len_treg * self.samps_per_clk
         # Create waveform with exact duration
-        i_data = np.zeros(self.mw_pulse_waveform_len_tdds)
-        q_data = np.zeros(self.mw_pulse_waveform_len_tdds)
-        i_data[:self.cfg.mw_pi_tdds] = 1
-        q_data[:self.cfg.mw_pi_tdds] = 1
+        i_data = np.zeros(self.mw_pulse_waveform_len_ftsamp)
+        q_data = np.zeros(self.mw_pulse_waveform_len_ftsamp)
+        i_data[:self.cfg.mw_pi_ftsamp] = 1
+        q_data[:self.cfg.mw_pi_ftsamp] = 1
         i_data *= self.soccfg.get_maxv(self.cfg.mw_channel)
         q_data *= self.soccfg.get_maxv(self.cfg.mw_channel)
         self.add_envelope(ch=self.cfg.mw_channel, name="pulse", idata=i_data, qdata=q_data)
@@ -203,3 +203,4 @@ class CountingDurationFineRes(NVAveragerProgram, ReadoutHelpers):
             plt.text(430, 407, "readout_reference_start = {} us".format(
                 int(cfg.readout_reference_start_tus)), fontsize=14)
             plt.title("           Rabi Oscillation Pulse Sequence", fontsize=20)
+

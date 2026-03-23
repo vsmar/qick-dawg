@@ -11,8 +11,8 @@ from itemattribute import ItemAttribute
 from qickdawg.util.apply_on_axis_0_n_times import apply_on_axis_0_n_times
 
 from ..nvpulsing.nvaverageprogram import NVAveragerProgram
+from ..nvpulsing.nvqicksweep import NVQickSweep
 from .readout_helpers import ReadoutHelpers
-from qick.averager_program import QickSweep
 import numpy as np
 
 
@@ -28,7 +28,7 @@ class PODMRFineRes(ReadoutHelpers, NVAveragerProgram):
         "laser_gate_pmod", # should be 0 for PMOD0_0
 
         # MW pulse parameters
-        "mw_pi_tdds",
+        "mw_pi_ftsamp",
         "mw_nqz", # 1 at 1405 MHz
         "mw_gain", # MW Gain
 
@@ -66,13 +66,13 @@ class PODMRFineRes(ReadoutHelpers, NVAveragerProgram):
         # Get samps per clk for later calculations
         self.samps_per_clk = self.soccfg['gens'][self.cfg.mw_channel]['samps_per_clk']
         # Configure the waveforms for fine resolution pulse steps (must be >= 3 treg units)
-        self.mw_pulse_waveform_len_treg = max(int(np.ceil(self.cfg.mw_pi_tdds / self.samps_per_clk)), 3)
-        self.mw_pulse_waveform_len_tdds = self.mw_pulse_waveform_len_treg * self.samps_per_clk
+        self.mw_pulse_waveform_len_treg = max(int(np.ceil(self.cfg.mw_pi_ftsamp / self.samps_per_clk)), 3)
+        self.mw_pulse_waveform_len_ftsamp = self.mw_pulse_waveform_len_treg * self.samps_per_clk
         # Create waveform with exact duration
-        i_data = np.zeros(self.mw_pulse_waveform_len_tdds)
-        q_data = np.zeros(self.mw_pulse_waveform_len_tdds)
-        i_data[:self.cfg.mw_pi_tdds] = 1
-        q_data[:self.cfg.mw_pi_tdds] = 1
+        i_data = np.zeros(self.mw_pulse_waveform_len_ftsamp)
+        q_data = np.zeros(self.mw_pulse_waveform_len_ftsamp)
+        i_data[:self.cfg.mw_pi_ftsamp] = 1
+        q_data[:self.cfg.mw_pi_ftsamp] = 1
         i_data *= self.soccfg.get_maxv(self.cfg.mw_channel)
         q_data *= self.soccfg.get_maxv(self.cfg.mw_channel)
         self.add_envelope(ch=self.cfg.mw_channel, name="pulse", idata=i_data, qdata=q_data)
@@ -88,7 +88,7 @@ class PODMRFineRes(ReadoutHelpers, NVAveragerProgram):
         
         # Setup frequency sweep
         self.mw_frequency_register = self.get_gen_reg(self.cfg.mw_channel, "freq")
-        self.add_sweep(QickSweep(self,
+        self.add_sweep(NVQickSweep(self,
                                 self.mw_frequency_register,
                                 self.cfg.mw_start_fMHz,
                                 self.cfg.mw_end_fMHz,
@@ -110,47 +110,3 @@ class PODMRFineRes(ReadoutHelpers, NVAveragerProgram):
         # self.acquire --> ReadoutHelpers.acquire --> NVAveragerProgram.acquire
         data = super().acquire(raw_data=raw_data, sweep_param='mw_fMHz', *arg, **kwarg)
         return data
-
-    def analyze_results(self, data):
-        """
-        Method that takes in a 1D array of data points from self.acquire() and analyzes the
-        results based on the number of reps and frequency points
-
-        Parameters
-        ----------
-        data
-            (1D np.array) data returned from self.acquire()
-
-        returns
-            (qickdawg.ItemAttribute instance) with attributes
-            .frequencies (len(nsweep_points) np array, MHz units) - frequencies swept over
-            .signal (nfrequency np.array, adc units)
-                - average adc signal with MW pulse
-            .reference (nfrequency np.array, adc units)
-                - signal at the end of the reinitialization pulse
-            .contrast (nfrequency np.array, fractional units)
-                - (signal - reference) / reference
-        """
-        data = np.reshape(data, self.data_shape)
-        
-        d = ItemAttribute()
-
-        d.signal1 = data[..., 0]
-        d.reference1 = data[..., 1]
-        d.signal2 = data[..., 2]
-        d.reference2 = data[..., 3]
-
-        # Average over all axes except the last (frequency) axis
-        n = len(d.signal1.shape) - 1
-        
-        for key in ['signal1', 'reference1', 'signal2', 'reference2']:
-            d[key] = apply_on_axis_0_n_times(d[key], np.sum, n)
-            d[key] = d[key] / (self.cfg.readout_integration_tns * 1e-9 * self.cfg.reps)
-
-        # Calculate signal/reference
-        d.contrast = d.signal1 / d.signal2
-        
-        # Add frequency axis
-        d.frequencies = self.qick_sweeps[0].get_sweep_pts()
-        
-        return d

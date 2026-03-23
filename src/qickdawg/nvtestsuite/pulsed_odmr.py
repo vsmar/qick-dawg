@@ -8,7 +8,6 @@ Author: Victor Marcenac
 '''
 from ..nvpulsing.nvaverageprogram import NVAveragerProgram
 from ..nvpulsing.nvqicksweep import NVQickSweep
-from qick.averager_program import QickSweep  # Add this import at top
 from ..util import apply_on_axis_0_n_times
 
 
@@ -87,7 +86,7 @@ class PODMR(NVAveragerProgram):
         self.mw_frequency_register = self.get_gen_reg(self.cfg.mw_channel, "freq")
 
         # Then in initialize():
-        self.add_sweep(QickSweep(self,
+        self.add_sweep(NVQickSweep(self,
                                 self.mw_frequency_register,
                                 self.cfg.mw_start_fMHz,  # Use fMHz like LockinODMR
                                 self.cfg.mw_end_fMHz,

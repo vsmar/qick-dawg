@@ -14,16 +14,18 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 
-import qickdawg as qd
 from qickdawg import PODMRFineRes
 
 from config import (
     load_config,
     build_nv_config,
     connect,
-    ns_to_samples,
-    get_ns_per_sample,
     save_experiment_hdf5,
+)
+from plotting_utils import (
+    extract_standard_traces,
+    plot_debug_traces,
+    plot_contrast_twin,
 )
 
 # =============================================================================
@@ -43,11 +45,14 @@ TRANSITION = None
 # Optional per-run overrides. If None, values come from selected transition.
 OVERRIDE_MW_GAIN = 2000
 
-# Set either tdds directly, or ns (which will be converted to tdds).
-OVERRIDE_MW_PI_TDDS = None
+# Set either ftsamp directly, or ns (which will be converted to ftsamp).
+OVERRIDE_MW_PI_FTSAMP = None
 OVERRIDE_MW_PI_NS = 339.5*2
 
 GET_REFERENCE = True
+PLOT_USE_COUNTS_S = True
+PLOT_DEBUG_RAW = False
+PLOT_METADATA_POSITION = "bottom"
 
 OUTPUT_DIR = Path(__file__).parent.parent / "data" / "podmr"
 
@@ -58,32 +63,30 @@ OUTPUT_DIR = Path(__file__).parent.parent / "data" / "podmr"
 cfg = load_config()
 connect(cfg)
 
-soccfg = qd.soccfg
 config = build_nv_config(cfg)
 
-mw_ch = cfg["hardware"]["mw_channel"]
 active_transition = TRANSITION or cfg["calibration"]["default_transition"]
 t = cfg["calibration"][active_transition]
 
 config.mw_gain = OVERRIDE_MW_GAIN if OVERRIDE_MW_GAIN is not None else t["mw_gain"]
 
-if OVERRIDE_MW_PI_TDDS is not None and OVERRIDE_MW_PI_NS is not None:
-    raise ValueError("Set only one of OVERRIDE_MW_PI_TDDS or OVERRIDE_MW_PI_NS.")
+if OVERRIDE_MW_PI_FTSAMP is not None and OVERRIDE_MW_PI_NS is not None:
+    raise ValueError("Set only one of OVERRIDE_MW_PI_FTSAMP or OVERRIDE_MW_PI_NS.")
 
-if OVERRIDE_MW_PI_TDDS is not None:
-    config.mw_pi_tdds = int(OVERRIDE_MW_PI_TDDS)
-    pi_source = f"OVERRIDE_MW_PI_TDDS={config.mw_pi_tdds}"
+if OVERRIDE_MW_PI_FTSAMP is not None:
+    config.mw_pi_ftsamp = int(OVERRIDE_MW_PI_FTSAMP)
+    pi_source = f"OVERRIDE_MW_PI_FTSAMP={config.mw_pi_ftsamp}"
 elif OVERRIDE_MW_PI_NS is not None:
-    config.mw_pi_tdds = ns_to_samples(float(OVERRIDE_MW_PI_NS), soccfg, mw_ch)
+    config.mw_pi_ftns = float(OVERRIDE_MW_PI_NS)
     pi_source = f"OVERRIDE_MW_PI_NS={OVERRIDE_MW_PI_NS} ns"
 else:
-    if t.get("mw_pi_tdds") is None:
+    if t.get("mw_pi_ftsamp") is None:
         raise ValueError(
             "No calibration pi pulse found for this transition. "
-            "Set OVERRIDE_MW_PI_TDDS (or OVERRIDE_MW_PI_NS)."
+            "Set OVERRIDE_MW_PI_FTSAMP (or OVERRIDE_MW_PI_NS)."
         )
-    config.mw_pi_tdds = int(t["mw_pi_tdds"])
-    pi_source = f"calibration.{active_transition}.mw_pi_tdds={config.mw_pi_tdds}"
+    config.mw_pi_ftsamp = int(t["mw_pi_ftsamp"])
+    pi_source = f"calibration.{active_transition}.mw_pi_ftsamp={config.mw_pi_ftsamp}"
 
 config.reps = REPS
 config.get_reference = GET_REFERENCE
@@ -108,7 +111,6 @@ data = prog.acquire(progress=True)
 # Save to HDF5
 # =============================================================================
 
-ns_per_sample = get_ns_per_sample(soccfg, mw_ch)
 out_path, timestamp = save_experiment_hdf5(
     PODMRFineRes,
     config,
@@ -116,14 +118,6 @@ out_path, timestamp = save_experiment_hdf5(
     data,
     OUTPUT_DIR,
     experiment_name="podmr_fine_res",
-    ns_per_sample=ns_per_sample,
-    custom_attrs={
-        "odmr_start_mhz": ODMR_START_MHZ,
-        "odmr_stop_mhz": ODMR_STOP_MHZ,
-        "odmr_delta_mhz": ODMR_DELTA_MHZ,
-        "transition": active_transition,
-        "get_reference": GET_REFERENCE,
-    },
 )
 
 print(f"[podmr] Saved -> {out_path}")
@@ -132,44 +126,17 @@ print(f"[podmr] Saved -> {out_path}")
 # Plot
 # =============================================================================
 
-if hasattr(data, "mw_fMHz"):
-    x_mhz = np.asarray(data.mw_fMHz, dtype=float)
-elif hasattr(data, "frequencies"):
-    x_mhz = np.asarray(data.frequencies, dtype=float)
-else:
-    raise ValueError("PODMRFineRes output missing frequency sweep axis (mw_fMHz/frequencies).")
+if not hasattr(data, "mw_fMHz"):
+    raise ValueError("PODMRFineRes output missing expected sweep axis mw_fMHz.")
+x_mhz = np.asarray(data.mw_fMHz, dtype=float)
 
-if x_mhz.ndim != 1:
-    raise ValueError(f"Expected 1D frequency axis, got shape {x_mhz.shape}.")
+traces = extract_standard_traces(data, x_axis=x_mhz, use_counts_s=PLOT_USE_COUNTS_S)
+signal = traces["signal1"]
+reference = traces["signal2"]
+contrast = traces["contrast"]
 
-signal_raw = getattr(data, "signal1_cts_s", getattr(data, "signal1", None))
-if signal_raw is None:
+if signal is None:
     raise ValueError("PODMRFineRes output missing signal1/signal1_cts_s field.")
-signal = np.asarray(signal_raw, dtype=float)
-if signal.ndim != 1:
-    raise ValueError(f"Expected 1D signal data, got shape {signal.shape}.")
-
-reference_raw = getattr(data, "signal2_cts_s", getattr(data, "signal2", None))
-reference = np.asarray(reference_raw, dtype=float) if reference_raw is not None else None
-if reference is not None and reference.ndim != 1:
-    raise ValueError(f"Expected 1D reference data, got shape {reference.shape}.")
-
-contrast_raw = getattr(data, "contrast", None)
-if contrast_raw is not None:
-    contrast = np.asarray(contrast_raw, dtype=float)
-    if contrast.ndim != 1:
-        raise ValueError(f"Expected 1D contrast data, got shape {contrast.shape}.")
-elif reference is not None:
-    contrast = signal / np.clip(reference, 1e-12, None)
-else:
-    contrast = None
-
-if len(signal) != len(x_mhz):
-    raise ValueError(f"Length mismatch: frequency has {len(x_mhz)} points but signal has {len(signal)}.")
-if reference is not None and len(reference) != len(x_mhz):
-    raise ValueError(f"Length mismatch: frequency has {len(x_mhz)} points but reference has {len(reference)}.")
-if contrast is not None and len(contrast) != len(x_mhz):
-    raise ValueError(f"Length mismatch: frequency has {len(x_mhz)} points but contrast has {len(contrast)}.")
 
 
 def _fit_podmr_dip(freq_axis_mhz: np.ndarray, y: np.ndarray):
@@ -223,113 +190,26 @@ def _fit_podmr_dip(freq_axis_mhz: np.ndarray, y: np.ndarray):
         }
 
 
-fig, ax1 = plt.subplots(figsize=(10.0, 4.5))
-ax2 = ax1.twinx() if contrast is not None else None
-
-colors = {
-    "signal": "tab:blue",
-    "reference": "tab:orange",
-    "contrast": "tab:green",
-    "fit": "black",
-    "dip": "red",
-}
-
-lines = []
-ax1.plot(x_mhz, signal, "-", linewidth=1.2, alpha=0.35, color=colors["signal"])
-lines += ax1.plot(
-    x_mhz,
-    signal,
-    "o",
-    markersize=6,
-    linestyle="None",
-    color=colors["signal"],
-    markeredgecolor="white",
-    markeredgewidth=0.4,
-    label="signal",
-)
-
-if reference is not None:
-    ax1.plot(x_mhz, reference, "-", linewidth=1.2, alpha=0.35, color=colors["reference"])
-    lines += ax1.plot(
-        x_mhz,
-        reference,
-        "o",
-        markersize=6,
-        linestyle="None",
-        color=colors["reference"],
-        markeredgecolor="white",
-        markeredgewidth=0.4,
-        label="reference",
-    )
-
 fit_summary_text = None
-if ax2 is not None:
-    ax2.plot(x_mhz, contrast, "--", linewidth=1.0, alpha=0.4, color=colors["contrast"])
-    lines += ax2.plot(
-        x_mhz,
-        contrast,
-        "s",
-        markersize=5.2,
-        linestyle="None",
-        color=colors["contrast"],
-        markeredgecolor="white",
-        markeredgewidth=0.35,
-        label="contrast ratio",
-    )
+fit_x = None
+fit_y = None
+dip_center_mhz = None
+dip_y = None
 
+if contrast is not None:
     fit = _fit_podmr_dip(x_mhz, contrast)
     if fit is not None:
         dip_center_mhz = float(fit["params"][1])
         dip_y = float(np.interp(dip_center_mhz, x_mhz, contrast))
-
-        if fit["fit_y"] is not None:
-            lines += ax2.plot(
-                fit["fit_x"],
-                fit["fit_y"],
-                "-",
-                linewidth=2.0,
-                color=colors["fit"],
-                label="contrast fit",
-            )
-
-        lines += ax2.plot(
-            [dip_center_mhz],
-            [dip_y],
-            "o",
-            markersize=6,
-            color=colors["dip"],
-            markeredgecolor="white",
-            markeredgewidth=0.4,
-            label="dip center",
-        )
-
-        ax2.annotate(
-            f"{dip_center_mhz:.3f} MHz",
-            xy=(dip_center_mhz, dip_y),
-            xytext=(0, -14),
-            textcoords="offset points",
-            ha="center",
-            fontsize=9,
-            color=colors["dip"],
-        )
-
-        ax2.text(
-            0.02,
-            0.98,
-            f"f_dip = {dip_center_mhz:.3f} MHz",
-            transform=ax2.transAxes,
-            ha="left",
-            va="top",
-            fontsize=9,
-            bbox=dict(boxstyle="round,pad=0.25", facecolor="white", alpha=0.8, edgecolor="gray"),
-        )
+        fit_x = fit["fit_x"]
+        fit_y = fit["fit_y"]
 
         if fit["model"] == "laplace_dip":
             depth = float(fit["params"][0])
             width = float(fit["params"][2])
             baseline = float(fit["params"][3])
             fit_summary_text = (
-                f"Fit (Laplace dip): center={dip_center_mhz:.3f} MHz, "
+                f"Laplace dip: center={dip_center_mhz:.3f} MHz, "
                 f"depth={depth:.4g}, width={width:.4g} MHz, baseline={baseline:.4g}"
             )
             print(
@@ -337,44 +217,76 @@ if ax2 is not None:
                 f"center={dip_center_mhz:.6f} MHz, depth={depth:.6g}, width={width:.6g} MHz, baseline={baseline:.6g}"
             )
         else:
-            fit_summary_text = f"Fit fallback (argmin): center={dip_center_mhz:.3f} MHz"
+            fit_summary_text = f"Argmin fallback dip center={dip_center_mhz:.3f} MHz"
             print(f"[podmr] Dip center (argmin fallback): {dip_center_mhz:.6f} MHz")
 
-    ax2.set_ylabel("Contrast ratio")
+metadata = {
+    "mw_MHz": f"{config.mw_fMHz:.3f}",
+    "gain": config.mw_gain,
+    "pi_ftsamp": config.mw_pi_ftsamp,
+    "mw_gain": config.mw_gain,
+    "reps": config.reps,
+    "laser_mW": cfg["optics"]["excitation_laser_power_mW"],
+    "units": "cts/s" if PLOT_USE_COUNTS_S else "raw",
+}
 
-ax1.set_xlabel("MW Frequency (MHz)")
-ax1.set_ylabel("Counts/s")
-ax1.set_title(
-    f"PODMR  |  {timestamp}  |  "
-    f"mw={config.mw_fMHz:.3f} MHz  |  gain={config.mw_gain}  |  "
-    f"pi={config.mw_pi_tdds} tdds  |  "
-    f"laser={cfg['optics']['excitation_laser_power_mW']} mW"
+if PLOT_DEBUG_RAW:
+    plot_debug_traces(
+        x_mhz,
+        traces,
+        x_label="MW Frequency (MHz)",
+        y_label="Counts/s" if PLOT_USE_COUNTS_S else "Counts",
+        title=f"PODMR Debug Raw | {timestamp}",
+        metadata=metadata,
+        metadata_position=PLOT_METADATA_POSITION,
+    )
+
+fig, ax_left, _, _ = plot_contrast_twin(
+    x_mhz,
+    traces,
+    x_label="MW Frequency (MHz)",
+    title=f"PODMR | {timestamp}",
+    metadata=metadata,
+    metadata_position=PLOT_METADATA_POSITION,
+    fit_x=fit_x,
+    fit_y=fit_y,
+    fit_label="contrast fit",
 )
-ax1.grid(alpha=0.2, linewidth=0.7)
 
-if lines:
-    labels = [line.get_label() for line in lines]
-    ax1.legend(
-        lines,
-        labels,
-        loc="upper right",
-        framealpha=0.98,
-        ncols=1,
-        facecolor="white",
+if dip_center_mhz is not None and dip_y is not None:
+    ax_left.plot(
+        [dip_center_mhz],
+        [dip_y],
+        "o",
+        markersize=6,
+        color="red",
+        markeredgecolor="white",
+        markeredgewidth=0.4,
+        label="dip center",
     )
-
-if ax2 is not None and fit_summary_text is not None:
-    fig.text(
-        0.5,
-        0.01,
-        fit_summary_text,
+    ax_left.annotate(
+        f"{dip_center_mhz:.3f} MHz",
+        xy=(dip_center_mhz, dip_y),
+        xytext=(0, -14),
+        textcoords="offset points",
         ha="center",
-        va="bottom",
-        fontsize=8.5,
+        fontsize=9,
+        color="red",
     )
-    fig.tight_layout(rect=(0.0, 0.04, 1.0, 1.0))
-else:
-    fig.tight_layout(rect=(0.0, 0.0, 1.0, 1.0))
+    handles, labels = ax_left.get_legend_handles_labels()
+    ax_left.legend(handles, labels, loc="best", framealpha=0.95)
+
+if fit_summary_text is not None:
+    ax_left.text(
+        0.02,
+        0.98,
+        fit_summary_text,
+        transform=ax_left.transAxes,
+        ha="left",
+        va="top",
+        fontsize=8.5,
+        bbox=dict(boxstyle="round,pad=0.25", facecolor="white", alpha=0.8, edgecolor="gray"),
+    )
 
 plot_path = out_path.with_suffix(".png")
 fig.savefig(plot_path, dpi=150)

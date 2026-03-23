@@ -88,13 +88,13 @@ calibration:
     mw_fMHz: 1846
     mw_nqz: 1
     mw_gain: 32767                # 32767 is max
-    mw_pi2_tdds: 130
-    mw_pi_tdds: 260              # set after Rabi calibration at this frequency
+    mw_pi2_ftsamp: 130
+    mw_pi_ftsamp: 260              # set after Rabi calibration at this frequency
 
 
   upper_dip:                        # ms = +1 transition
     mw_fMHz: 3895.05
     mw_nqz: 2                       # lower NQZ cutoff is 2.495 GHz
     mw_gain: 5000                   # may differ from lower_dip — recalibrate
-    mw_pi_tdds: null
-    mw_pi2_tdds: null
+    mw_pi_ftsamp: null
+    mw_pi2_ftsamp: null

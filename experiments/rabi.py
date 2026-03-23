@@ -14,24 +14,26 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit, OptimizeWarning
 
-import qickdawg as qd
 from qickdawg import RabiFineRes
 
 from config import (
     load_config,
     build_nv_config,
     connect,
-    ns_to_samples,
-    get_ns_per_sample,
     save_experiment_hdf5,
+)
+from plotting_utils import (
+    extract_standard_traces,
+    plot_debug_traces,
+    plot_contrast_twin,
 )
 
 # =============================================================================
 # EXPERIMENT PARAMETERS — edit these before each run
 # =============================================================================
 
-# Sweep bounds in nanoseconds — converted to samples automatically below.
-# Use ns here so the values are human-readable and comparable across setups.
+# Sweep bounds in nanoseconds.
+# NVConfiguration handles conversion to ftsamp/treg companion units.
 MW_DURATION_START_NS = 50     # ns
 MW_DURATION_STOP_NS  = 300 #2000    # ns
 MW_DURATION_DELTA_NS = 5      # ns  (step size)
@@ -46,6 +48,9 @@ OVERRIDE_FREQ_MHZ = None   # e.g. 1845.7
 OVERRIDE_MW_GAIN  = None   # e.g. 20000
 
 GET_REFERENCE = True          # acquire reference readout with MW gain = 0
+PLOT_USE_COUNTS_S = True
+PLOT_DEBUG_RAW = False
+PLOT_METADATA_POSITION = "top"
 
 OUTPUT_DIR = Path(__file__).parent.parent / "data" / "rabi"
 
@@ -56,19 +61,11 @@ OUTPUT_DIR = Path(__file__).parent.parent / "data" / "rabi"
 cfg    = load_config()
 connect(cfg)
 
-# soccfg is needed for the sample conversion — adjust if qickdawg exposes it
-# differently (e.g. qd.soccfg, or returned from start_client)
-soccfg = qd.soccfg
-
 config = build_nv_config(cfg)
-
-# Convert sweep bounds from ns → samples (_tdds)
-mw_ch = cfg["hardware"]["mw_channel"]
-start_tdds = ns_to_samples(MW_DURATION_START_NS, soccfg, mw_ch)
-stop_tdds  = ns_to_samples(MW_DURATION_STOP_NS,  soccfg, mw_ch)
-delta_tdds = ns_to_samples(MW_DURATION_DELTA_NS, soccfg, mw_ch)
-
-print(f"[rabi] Sweep: {start_tdds} → {stop_tdds} tdds  (Δ {delta_tdds})")
+print(
+    f"[rabi] Sweep: {MW_DURATION_START_NS:.3f} -> {MW_DURATION_STOP_NS:.3f} ns "
+    f"(delta {MW_DURATION_DELTA_NS:.3f} ns)"
+)
 
 # Choose transition context: explicit TRANSITION, otherwise config default.
 active_transition = TRANSITION or cfg["calibration"]["default_transition"]
@@ -83,11 +80,12 @@ print(f"[rabi] Active transition: {active_transition} | freq={config.mw_fMHz} MH
 config.reps                = REPS
 config.get_reference       = GET_REFERENCE
 
-config.add_unitless_linear_sweep(
-    "mw_duration_tdds",
-    start_tdds,
-    stop_tdds,
-    delta=delta_tdds,
+config.add_linear_sweep(
+    "mw_duration",
+    "ftns",
+    start=MW_DURATION_START_NS,
+    stop=MW_DURATION_STOP_NS,
+    delta=MW_DURATION_DELTA_NS,
 )
 
 # =============================================================================
@@ -101,7 +99,6 @@ data = prog.acquire(progress=True)
 # Save to HDF5
 # =============================================================================
 
-ns_per_sample = get_ns_per_sample(soccfg, mw_ch)
 out_path, timestamp = save_experiment_hdf5(
     RabiFineRes,
     config,
@@ -109,7 +106,6 @@ out_path, timestamp = save_experiment_hdf5(
     data,
     OUTPUT_DIR,
     experiment_name="rabi_fine_res",
-    ns_per_sample=ns_per_sample,
 )
 
 print(f"[rabi] Saved → {out_path}")
@@ -118,51 +114,17 @@ print(f"[rabi] Saved → {out_path}")
 # Plot
 # =============================================================================
 
-# Build plotting arrays directly from analyzed RabiFineRes output.
-# If these are not 1D, the sweep/source mapping is likely wrong upstream.
-if not hasattr(data, "mw_duration_tdds"):
-    raise ValueError("RabiFineRes output missing sweep field 'mw_duration_tdds'.")
+# Build plotting array from the canonical analyzed sweep axis.
+if not hasattr(data, "mw_duration_ftns"):
+    raise ValueError("RabiFineRes output missing expected sweep axis mw_duration_ftns.")
+x_ns = np.asarray(data.mw_duration_ftns, dtype=float)
+traces = extract_standard_traces(data, x_axis=x_ns, use_counts_s=PLOT_USE_COUNTS_S)
+signal = traces["signal1"]
+reference = traces["signal2"]
+contrast = traces["contrast"]
 
-x_tdds = np.asarray(data.mw_duration_tdds, dtype=float)
-if x_tdds.ndim != 1:
-    raise ValueError(f"Expected 1D mw_duration_tdds, got shape {x_tdds.shape}.")
-
-x_ns = x_tdds * ns_per_sample
-
-signal_raw = getattr(data, "signal1_cts_s", getattr(data, "signal1", None))
-if signal_raw is None:
+if signal is None:
     raise ValueError("RabiFineRes output missing signal1/signal1_cts_s field.")
-signal = np.asarray(signal_raw, dtype=float)
-if signal.ndim != 1:
-    raise ValueError(f"Expected 1D signal data, got shape {signal.shape}.")
-
-reference_raw = getattr(data, "signal2_cts_s", getattr(data, "signal2", None))
-reference = np.asarray(reference_raw, dtype=float) if reference_raw is not None else None
-if reference is not None and reference.ndim != 1:
-    raise ValueError(f"Expected 1D reference data, got shape {reference.shape}.")
-
-contrast_raw = getattr(data, "contrast", None)
-if contrast_raw is not None:
-    contrast = np.asarray(contrast_raw, dtype=float)
-    if contrast.ndim != 1:
-        raise ValueError(f"Expected 1D contrast data, got shape {contrast.shape}.")
-elif reference is not None:
-    contrast = signal / np.clip(reference, 1e-12, None)
-else:
-    contrast = None
-
-if len(signal) != len(x_ns):
-    raise ValueError(
-        f"Length mismatch: mw_duration_tdds has {len(x_ns)} points but signal has {len(signal)}."
-    )
-if reference is not None and len(reference) != len(x_ns):
-    raise ValueError(
-        f"Length mismatch: mw_duration_tdds has {len(x_ns)} points but reference has {len(reference)}."
-    )
-if contrast is not None and len(contrast) != len(x_ns):
-    raise ValueError(
-        f"Length mismatch: mw_duration_tdds has {len(x_ns)} points but contrast has {len(contrast)}."
-    )
 
 
 def _guess_rabi_period_ns(x_axis_ns: np.ndarray, y: np.ndarray) -> float:
@@ -273,71 +235,36 @@ def _fit_rabi_contrast(x_axis_ns: np.ndarray, y: np.ndarray):
     except (RuntimeError, ValueError):
         return None
 
-fig, ax1 = plt.subplots(figsize=(10.0, 4.5))
-ax2 = ax1.twinx() if contrast is not None else None
-
-colors = {
-    "signal": "tab:blue",
-    "reference": "tab:orange",
-    "contrast": "tab:green",
-    "fit": "black",
+metadata = {
+    "mw_MHz": f"{config.mw_fMHz:.3f}",
+    "gain": config.mw_gain,
+    "reps": config.reps,
+    "laser_mW": cfg["optics"]["excitation_laser_power_mW"],
+    "units": "cts/s" if PLOT_USE_COUNTS_S else "raw",
 }
 
-lines = []
-ax1.plot(x_ns, signal, "-", linewidth=1.2, alpha=0.35, color=colors["signal"])
-lines += ax1.plot(
-    x_ns,
-    signal,
-    "o",
-    markersize=6,
-    linestyle="None",
-    color=colors["signal"],
-    markeredgecolor="white",
-    markeredgewidth=0.4,
-    label="signal",
-)
-if reference is not None:
-    ax1.plot(x_ns, reference, "-", linewidth=1.2, alpha=0.35, color=colors["reference"])
-    lines += ax1.plot(
+if PLOT_DEBUG_RAW:
+    plot_debug_traces(
         x_ns,
-        reference,
-        "o",
-        markersize=6,
-        linestyle="None",
-        color=colors["reference"],
-        markeredgecolor="white",
-        markeredgewidth=0.4,
-        label="reference",
+        traces,
+        x_label="MW Pulse Duration (ns)",
+        y_label="Counts/s" if PLOT_USE_COUNTS_S else "Counts",
+        title=f"Rabi Debug Raw | {timestamp}",
+        metadata=metadata,
+        metadata_position=PLOT_METADATA_POSITION,
     )
 
-if ax2 is not None:
-    ax2.plot(x_ns, contrast, "--", linewidth=1.0, alpha=0.4, color=colors["contrast"])
-    lines += ax2.plot(
-        x_ns,
-        contrast,
-        "s",
-        markersize=5.2,
-        linestyle="None",
-        color=colors["contrast"],
-        markeredgecolor="white",
-        markeredgewidth=0.35,
-        label="contrast ratio",
-    )
-
-    fit_summary_text = None
+fit_summary_text = None
+fit_x = None
+fit_y = None
+if contrast is not None:
     fit = _fit_rabi_contrast(x_ns, contrast)
     if fit is not None:
+        fit_x = fit["fit_x"]
+        fit_y = fit["fit_y"]
         period_fit_ns = float(fit["params"][1])
         pi2_ns = period_fit_ns / 4.0
         rabi_freq_mhz = 1000.0 / period_fit_ns
-        lines += ax2.plot(
-            fit["fit_x"],
-            fit["fit_y"],
-            "-",
-            linewidth=2.0,
-            color=colors["fit"],
-            label="contrast fit",
-        )
 
         if fit["model"] == "decaying":
             tau_fit_ns = float(fit["params"][3])
@@ -353,19 +280,6 @@ if ax2 is not None:
                 f"C={fit['params'][2]:.4g}, "
                 f"tau={tau_fit_ns:.2f} ns"
             )
-            ax2.text(
-                0.02,
-                0.98,
-                (
-                    f"f_Rabi = {rabi_freq_mhz:.3f} MHz\\n"
-                    f"tau = {tau_fit_ns:.2f} ns"
-                ),
-                transform=ax2.transAxes,
-                ha="left",
-                va="top",
-                fontsize=9,
-                bbox=dict(boxstyle="round,pad=0.25", facecolor="white", alpha=0.8, edgecolor="gray"),
-            )
         else:
             print(
                 "[rabi] Contrast fit (no decay): "
@@ -377,54 +291,33 @@ if ax2 is not None:
                 f"f_Rabi={rabi_freq_mhz:.3f} MHz, pi/2={pi2_ns:.2f} ns, "
                 f"C={fit['params'][2]:.4g}"
             )
-            ax2.text(
-                0.02,
-                0.98,
-                f"f_Rabi = {rabi_freq_mhz:.3f} MHz",
-                transform=ax2.transAxes,
-                ha="left",
-                va="top",
-                fontsize=9,
-                bbox=dict(boxstyle="round,pad=0.25", facecolor="white", alpha=0.8, edgecolor="gray"),
-            )
     else:
         print("[rabi] Contrast fit skipped: fit did not converge.")
         fit_summary_text = "Fit: did not converge."
 
-    ax2.set_ylabel("Contrast ratio")
-
-ax1.set_xlabel("MW Pulse Duration (ns)")
-ax1.set_ylabel("Counts/s")
-ax1.set_title(
-    f"Rabi  |  {timestamp}  |  "
-    f"{config.mw_fMHz:.3f} MHz  |  gain={config.mw_gain}  |  "
-    f"laser={cfg['optics']['excitation_laser_power_mW']} mW"
+fig, ax_left, _, _ = plot_contrast_twin(
+    x_ns,
+    traces,
+    x_label="MW Pulse Duration (ns)",
+    title=f"Rabi | {timestamp}",
+    metadata=metadata,
+    metadata_position=PLOT_METADATA_POSITION,
+    fit_x=fit_x,
+    fit_y=fit_y,
+    fit_label="contrast fit",
 )
-ax1.grid(alpha=0.2, linewidth=0.7)
 
-if lines:
-    labels = [line.get_label() for line in lines]
-    ax1.legend(
-        lines,
-        labels,
-        loc="upper right",
-        framealpha=0.98,
-        ncols=1,
-        facecolor="white",
-    )
-
-if ax2 is not None and fit_summary_text is not None:
-    fig.text(
-        0.5,
-        0.01,
+if fit_summary_text is not None:
+    ax_left.text(
+        0.02,
+        0.98,
         fit_summary_text,
-        ha="center",
-        va="bottom",
+        transform=ax_left.transAxes,
+        ha="left",
+        va="top",
         fontsize=8.5,
+        bbox=dict(boxstyle="round,pad=0.25", facecolor="white", alpha=0.8, edgecolor="gray"),
     )
-    fig.tight_layout(rect=(0.0, 0.04, 1.0, 1.0))
-else:
-    fig.tight_layout(rect=(0.0, 0.0, 1.0, 1.0))
 
 plot_path = out_path.with_suffix(".png")
 fig.savefig(plot_path, dpi=150)

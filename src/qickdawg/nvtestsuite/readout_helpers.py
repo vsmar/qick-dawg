@@ -122,6 +122,112 @@ class ReadoutHelpers:
             data = self.analyze_results_helper(data, sweep_param=sweep_param)
         return data
 
+    def _add_sweep_with_conversions(self, d, sweep_param, sweep_pts):
+        """Attach the provided sweep axis and NVConfiguration-style unit conversions."""
+        d[sweep_param] = sweep_pts
+        d.sweep_param = sweep_param
+
+        if '_' not in sweep_param:
+            return
+
+        base, suffix = sweep_param.rsplit('_', 1)
+        vals = np.asarray(sweep_pts)
+
+        # Keep conversion behavior aligned with NVConfiguration.
+        soccfg = self.cfg.soccfg
+
+        def _reg2freq_array(reg_arr):
+            return np.asarray([soccfg.reg2freq(int(r)) for r in reg_arr], dtype=float)
+
+        def _freq2reg_array(freq_arr_mhz):
+            return np.asarray([soccfg.freq2reg(float(f)) for f in freq_arr_mhz], dtype=int)
+
+        def _cycles2us_array(cycles_arr):
+            return np.asarray([soccfg.cycles2us(int(c)) for c in cycles_arr], dtype=float)
+
+        def _us2cycles_array(us_arr):
+            return np.asarray([soccfg.us2cycles(float(u)) for u in us_arr], dtype=int)
+
+        def _reg2deg_array(reg_arr):
+            return np.asarray([soccfg.reg2deg(int(r)) for r in reg_arr], dtype=float)
+
+        def _deg2reg_array(deg_arr):
+            return np.asarray([soccfg.deg2reg(float(p)) for p in deg_arr], dtype=int)
+
+        if suffix in ('fMHz', 'fGHz', 'freg'):
+            if suffix == 'fMHz':
+                freg = _freq2reg_array(vals)
+                fMHz = _reg2freq_array(freg)
+            elif suffix == 'fGHz':
+                freg = _freq2reg_array(vals * 1000.0)
+                fMHz = _reg2freq_array(freg)
+            else:  # freg
+                freg = np.rint(vals).astype(int)
+                fMHz = _reg2freq_array(freg)
+
+            d[base + '_freg'] = freg
+            d[base + '_fMHz'] = fMHz
+            d[base + '_fGHz'] = fMHz / 1000.0
+            return
+
+        if suffix in ('tus', 'tns', 'treg'):
+            if suffix == 'tus':
+                treg = _us2cycles_array(vals)
+                tus = _cycles2us_array(treg)
+            elif suffix == 'tns':
+                treg = _us2cycles_array(vals / 1000.0)
+                tus = _cycles2us_array(treg)
+            else:  # treg
+                treg = np.rint(vals).astype(int)
+                tus = _cycles2us_array(treg)
+
+            d[base + '_treg'] = treg
+            d[base + '_tus'] = tus
+            d[base + '_tns'] = tus * 1000.0
+            return
+
+        if suffix in ('ftus', 'ftns', 'ftsamp'):
+            # Prefer hardware-defined samples/clk for the configured MW channel.
+            # Fall back to config assumption, then default 16.
+            ft_samps_per_clk = None
+            mw_channel = getattr(self.cfg, 'mw_channel', None)
+            if mw_channel is not None:
+                try:
+                    ft_samps_per_clk = soccfg['gens'][mw_channel]['samps_per_clk']
+                except Exception:
+                    ft_samps_per_clk = None
+
+            if ft_samps_per_clk is None:
+                ft_samps_per_clk = getattr(self.cfg, 'ft_samps_per_clk_assumed', 16)
+
+            sample2us = soccfg.cycles2us(1) / ft_samps_per_clk
+
+            if suffix == 'ftus':
+                ftsamp = np.rint(vals / sample2us).astype(int)
+            elif suffix == 'ftns':
+                ftsamp = np.rint((vals / 1000.0) / sample2us).astype(int)
+            else:  # ftsamp
+                ftsamp = np.rint(vals).astype(int)
+
+            ftus = ftsamp * sample2us
+            d[base + '_ftsamp'] = ftsamp
+            d[base + '_ftus'] = ftus
+            d[base + '_ftns'] = ftus * 1000.0
+            return
+
+        if suffix in ('pdegrees', 'pdeg', 'preg'):
+            if suffix in ('pdegrees', 'pdeg'):
+                preg = _deg2reg_array(vals)
+                pdegrees = _reg2deg_array(preg)
+            else:  # preg
+                preg = np.rint(vals).astype(int)
+                pdegrees = _reg2deg_array(preg)
+
+            d[base + '_preg'] = preg
+            d[base + '_pdegrees'] = pdegrees
+            d[base + '_pdeg'] = pdegrees
+            return
+
     def analyze_results_helper(self, data, sweep_param=None):
         """
         Method that takes in a 1D array of data points from self.acquire() and analyzes the
@@ -148,10 +254,12 @@ class ReadoutHelpers:
 
         norm_factor = self.cfg.readout_integration_tns * 1e-9 * self.cfg.reps
 
+        # RF on readout
         d.signal1 = data[..., 0]
         d.reference1 = data[..., 1]
 
         if self.cfg.get_reference:
+            # RF off readout
              d.signal2 = data[..., 2]
              d.reference2 = data[..., 3]
 
@@ -172,11 +280,11 @@ class ReadoutHelpers:
         if self.cfg.get_reference:
             d.contrast = d.signal1 / d.signal2
 
-        # Add sweep points if available (subclass should override to rename as appropriate)
+        # Add sweep points if available.
         if hasattr(self, 'qick_sweeps') and len(self.qick_sweeps) > 0:
+            pts = self.qick_sweeps[0].get_sweep_pts()
+            d.sweep_pts = pts
             if sweep_param is not None:
-                d[sweep_param] = self.qick_sweeps[0].get_sweep_pts()
-            else:
-                d.sweep_pts = self.qick_sweeps[0].get_sweep_pts()
+                self._add_sweep_with_conversions(d, sweep_param, pts)
         
         return d
