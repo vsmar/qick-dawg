@@ -95,13 +95,12 @@ from qdlutils.applications.qdlscan.reoptimizer import AxisOptimizationResult, Re
 # =============================================================================
 # CPMG chunk parameters (same spirit as experiments/cpmg.py)
 # =============================================================================
+TAU_START_FTNS = 6_000 # 2_700.0
+TAU_STOP_FTNS = 10_000 # 3_500.0
+TAU_DELTA_FTNS = 5
 
-TAU_START_FTNS = 1600.0
-TAU_STOP_FTNS = 2000.0
-TAU_DELTA_FTNS = 1.6
-
-N_CPMG = 64
-GET_REFERENCE = True
+N_CPMG = 32
+GET_REFERENCE = False # True
 TRANSITION = None
 
 OVERRIDE_FREQ_MHZ = None
@@ -111,7 +110,18 @@ OVERRIDE_MW_PI2_FTNS = None
 
 # If TARGET_TOTAL_REPS is not divisible by CHUNK_REPS, the final chunk uses remainder reps.
 TARGET_TOTAL_REPS = 100000 # 1_000
-CHUNK_REPS = 5000
+CHUNK_REPS = 3000
+
+
+def _env_flag_true(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+# Respect shell-level progress toggles for long terminal runs.
+ACQUIRE_PROGRESS = not _env_flag_true("TQDM_DISABLE", default=False)
 
 # =============================================================================
 # Reoptimization parameters
@@ -129,7 +139,7 @@ AXIS_LIMITS_UM = {
 }
 
 # Startup and move-safety controls for reoptimization
-INITIAL_POSITION_UM: Optional[Tuple[float, float, float]] = (-2.880, -1.07782, -3.94)
+INITIAL_POSITION_UM: Optional[Tuple[float, float, float]] = (-2.6222, -0.1904, -4.43081)
 ALLOW_UNSEEDED_REOPT_START = False
 REQUIRE_FIT_SUCCESS_FOR_AXIS_MOVE = True
 MIN_AXIS_IMPROVEMENT_CTS_S = 0.0
@@ -396,6 +406,7 @@ def _save_chunk_cts_plot(
     tau_ftns: np.ndarray,
     chunk_series: Dict[str, np.ndarray],
     cycle_index: int,
+    run_id: str,
     out_path: Path,
 ) -> bool:
     """Save per-chunk debug plot with all available raw channels."""
@@ -423,10 +434,20 @@ def _save_chunk_cts_plot(
     fig, _ = plot_debug_traces(
         tau_ftns,
         traces,
-        x_label="tau_ftns",
+        x_label=r"$\tau$ (ftns)",
         y_label="counts/s",
-        title=f"CPMG chunk {cycle_index}: raw cts/s traces",
-        metadata={"cycle": cycle_index, "units": "cts/s"},
+        title=(
+            f"CPMG chunk {cycle_index}: raw cts/s traces | "
+            f"$\\pi/2_y - \\{{\\tau - \\pi_{{XY8}} - \\tau\\}}\\times N - \\pi/2_{{-y}}$ "
+            f"| phase XYXYYXYX"
+        ),
+        metadata={
+            "run_id": run_id,
+            "cycle": cycle_index,
+            "units": "cts/s",
+            "sequence": "pi/2_y - {tau - pi_xy8 - tau}xN - pi/2_-y",
+            "xy8_phase_order": "XYXYYXYX",
+        },
         metadata_position="bottom",
     )
     fig.savefig(out_path, dpi=150)
@@ -439,6 +460,7 @@ def _save_cumulative_plot(
     signal_avg: np.ndarray,
     reference_avg: np.ndarray,
     cycle_index: int,
+    run_id: str,
     out_path: Path,
 ) -> None:
     """Save cumulative weighted-average contrast-focused twin plot."""
@@ -455,9 +477,19 @@ def _save_cumulative_plot(
     fig, _, _, _ = plot_contrast_twin(
         tau_ftns,
         traces,
-        x_label="tau_ftns",
-        title=f"CPMG cumulative through chunk {cycle_index}",
-        metadata={"cycle": cycle_index, "units": "cts/s"},
+        x_label=r"$\tau$ (ftns)",
+        title=(
+            f"CPMG cumulative through chunk {cycle_index} | "
+            f"$\\pi/2_y - \\{{\\tau - \\pi_{{XY8}} - \\tau\\}}\\times N - \\pi/2_{{-y}}$ "
+            f"| phase XYXYYXYX"
+        ),
+        metadata={
+            "run_id": run_id,
+            "cycle": cycle_index,
+            "units": "cts/s",
+            "sequence": "pi/2_y - {tau - pi_xy8 - tau}xN - pi/2_-y",
+            "xy8_phase_order": "XYXYYXYX",
+        },
         metadata_position="bottom",
         raw_alpha=0.3,
     )
@@ -745,7 +777,8 @@ def run_cpmg_reopt_loop() -> Dict[str, Any]:
 
     print(
         f"[loop] run_id={run_id} target_total_reps={TARGET_TOTAL_REPS} "
-        f"chunk_reps={CHUNK_REPS} planned_chunks={planned_chunks}"
+        f"chunk_reps={CHUNK_REPS} planned_chunks={planned_chunks} "
+        f"acquire_progress={ACQUIRE_PROGRESS}"
     )
 
     run_start_monotonic = time.perf_counter()
@@ -753,6 +786,7 @@ def run_cpmg_reopt_loop() -> Dict[str, Any]:
     for cycle_index in range(planned_chunks):
         chunk_reps = int(min(CHUNK_REPS, remaining_reps))
         chunk_start_utc = datetime.now(UTC).isoformat(timespec="seconds")
+        chunk_start_monotonic = time.perf_counter()
 
         config, active_transition = build_cpmg_config_for_chunk(cfg, chunk_reps)
 
@@ -762,7 +796,7 @@ def run_cpmg_reopt_loop() -> Dict[str, Any]:
         )
 
         prog = CPMGXYFineRes(config)
-        data = prog.acquire(progress=True)
+        data = prog.acquire(progress=ACQUIRE_PROGRESS)
 
         custom_attrs = {
             "loop_run_id": run_id,
@@ -799,6 +833,7 @@ def run_cpmg_reopt_loop() -> Dict[str, Any]:
                 tau_ftns=tau_ftns,
                 chunk_series=chunk_series,
                 cycle_index=cycle_index,
+                run_id=run_id,
                 out_path=chunk_plot_path,
             )
 
@@ -826,6 +861,7 @@ def run_cpmg_reopt_loop() -> Dict[str, Any]:
                             signal_avg=signal_avg,
                             reference_avg=reference_avg,
                             cycle_index=cycle_index,
+                            run_id=run_id,
                             out_path=cumulative_plot_path,
                         )
                         cumulative_plot_saved = True
@@ -914,6 +950,8 @@ def run_cpmg_reopt_loop() -> Dict[str, Any]:
 
         cycle_rows.append(cycle_record)
 
+        chunk_elapsed_s = time.perf_counter() - chunk_start_monotonic
+
         elapsed_s = time.perf_counter() - run_start_monotonic
         completed_chunks = cycle_index + 1
         avg_cycle_s = elapsed_s / completed_chunks
@@ -924,6 +962,7 @@ def run_cpmg_reopt_loop() -> Dict[str, Any]:
 
         cycle_record["loop_elapsed_s"] = round(elapsed_s, 3)
         cycle_record["loop_avg_cycle_s"] = round(avg_cycle_s, 3)
+        cycle_record["chunk_elapsed_s"] = round(chunk_elapsed_s, 3)
         cycle_record["loop_eta_remaining_s"] = round(eta_remaining_s, 3)
         cycle_record["loop_eta_finish_local"] = eta_finish_local_text
         _write_summary_csv(summary_path, cycle_rows)
@@ -931,6 +970,7 @@ def run_cpmg_reopt_loop() -> Dict[str, Any]:
         print(
             f"[loop] cycle={cycle_index} saved={out_path.name} "
             f"pre_next_reopt_status={pre_chunk_reopt_status} "
+            f"chunk_elapsed={_format_duration_s(chunk_elapsed_s)} "
             f"elapsed={_format_duration_s(elapsed_s)} "
             f"eta_remaining={_format_duration_s(eta_remaining_s)} "
             f"eta_finish_local={eta_finish_local_text}"

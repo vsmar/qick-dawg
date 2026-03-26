@@ -33,25 +33,25 @@ from plotting_utils import (
 # =============================================================================
 
 # Sweep bounds in MHz.
-ODMR_START_MHZ = 1843.0
-ODMR_STOP_MHZ = 1849.0
-ODMR_DELTA_MHZ = 0.2
+ODMR_START_MHZ = 1844.5
+ODMR_STOP_MHZ = 1847.5
+ODMR_DELTA_MHZ = 0.05
 
-REPS = 100000
+REPS = 200000
 
 # Transition — set to "lower_dip", "upper_dip", or None to use config default.
 TRANSITION = None
 
 # Optional per-run overrides. If None, values come from selected transition.
-OVERRIDE_MW_GAIN = 2000
+OVERRIDE_MW_GAIN = 1200
 
 # Set either ftsamp directly, or ns (which will be converted to ftsamp).
 OVERRIDE_MW_PI_FTSAMP = None
-OVERRIDE_MW_PI_NS = 339.5*2
+OVERRIDE_MW_PI_NS = 950
 
 GET_REFERENCE = True
 PLOT_USE_COUNTS_S = True
-PLOT_DEBUG_RAW = False
+PLOT_DEBUG_RAW = True
 PLOT_METADATA_POSITION = "bottom"
 
 OUTPUT_DIR = Path(__file__).parent.parent / "data" / "podmr"
@@ -119,6 +119,7 @@ out_path, timestamp = save_experiment_hdf5(
     OUTPUT_DIR,
     experiment_name="podmr_fine_res",
 )
+run_id = out_path.stem
 
 print(f"[podmr] Saved -> {out_path}")
 
@@ -221,6 +222,7 @@ if contrast is not None:
             print(f"[podmr] Dip center (argmin fallback): {dip_center_mhz:.6f} MHz")
 
 metadata = {
+    "run_id": run_id,
     "mw_MHz": f"{config.mw_fMHz:.3f}",
     "gain": config.mw_gain,
     "pi_ftsamp": config.mw_pi_ftsamp,

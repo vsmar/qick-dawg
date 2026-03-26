@@ -48,7 +48,7 @@ photon_counting:
 # Update before each run series.
 # -----------------------------------------------------------------------------
 optics:
-  excitation_laser_power_mW: 0.320    # REQUIRED — measure and update before running
+  excitation_laser_power_mW: 0.061   # REQUIRED — measure and update before running
   excitation_laser_wavelength_nm: 532
 
 
@@ -60,9 +60,9 @@ optics:
 timing:
   relax_delay_tus: 2
   mw_to_laser_delay_tns: 555
-  laser_on_tus: 4
-  readout_integration_tns: 340
-  laser_readout_offset_tus: 1.08
+  laser_on_tus: 6 # 4
+  readout_integration_tns: 680 # 430
+  laser_readout_offset_tus: 1.169 # 1.16
   readout_reference_start_tus: 3.5
 
 
@@ -85,11 +85,11 @@ calibration:
   default_transition: lower_dip     # which transition build_nv_config() defaults to
 
   lower_dip:                        # ms = -1 transition
-    mw_fMHz: 1846
+    mw_fMHz: 1845.8 # 1845.7
     mw_nqz: 1
     mw_gain: 32767                # 32767 is max
-    mw_pi2_ftsamp: 130
-    mw_pi_ftsamp: 260              # set after Rabi calibration at this frequency
+    mw_pi2_ftsamp: 132
+    mw_pi_ftsamp: 262              # set after Rabi calibration at this frequency
 
 
   upper_dip:                        # ms = +1 transition

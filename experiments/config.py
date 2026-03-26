@@ -22,6 +22,8 @@ Typical usage
     nv_cfg = build_nv_config(cfg)
 """
 
+from copy import copy
+
 import yaml
 from pathlib import Path
 import numpy as np
@@ -143,6 +145,9 @@ def build_nv_config(cfg: dict) -> qd.NVConfiguration:
     config.edge_counting = pc.get("edge_counting", True)
     config.high_threshold = pc.get("high_threshold", 8000)
     config.low_threshold = pc.get("low_threshold", 500)
+
+    # Temporary laser off safegaurd
+    qd.laser_off(copy(config))
 
     return config
 

@@ -31,12 +31,12 @@ from plotting_utils import (
 # =============================================================================
 
 # Sweep bounds in fine-time nanoseconds (ftns).
-TAU_START_FTNS = 1600.0
-TAU_STOP_FTNS = 2000.0
-TAU_DELTA_FTNS = 10
+TAU_START_FTNS = 6_000 # 2_700.0
+TAU_STOP_FTNS = 10_000 # 3_500.0
+TAU_DELTA_FTNS = 5
 
-N_CPMG = 16
-REPS = 7500
+N_CPMG = 32  # 32
+REPS = 3000
 
 # Transition — set to "lower_dip", "upper_dip", or None to use config default.
 TRANSITION = None
@@ -47,7 +47,7 @@ OVERRIDE_MW_GAIN = None
 OVERRIDE_MW_PI2_FTSAMP = None
 OVERRIDE_MW_PI2_FTNS = None
 
-GET_REFERENCE = True
+GET_REFERENCE = False # True
 PLOT_USE_COUNTS_S = True
 PLOT_DEBUG_RAW = False
 PLOT_METADATA_POSITION = "bottom"
@@ -124,6 +124,7 @@ out_path, timestamp = save_experiment_hdf5(
     OUTPUT_DIR,
     experiment_name="cpmg_xy_fine_res",
 )
+run_id = out_path.stem
 
 print(f"[cpmg] Saved -> {out_path}")
 
@@ -137,10 +138,13 @@ x_axis = np.asarray(data.tau_ftus, dtype=float)
 
 traces = extract_standard_traces(data, x_axis=x_axis, use_counts_s=PLOT_USE_COUNTS_S)
 metadata = {
+    "run_id": run_id,
     "mw_MHz": f"{config.mw_fMHz:.3f}",
     "gain": config.mw_gain,
     "pi2_ftsamp": config.mw_pi2_ftsamp,
     "pi2_ftns": f"{config.mw_pi2_ftns:.2f}",
+    "sequence": "pi/2_y - {tau - pi_xy8 - tau}xN - pi/2_-y",
+    "xy8_phase_order": "XYXYYXYX",
     "n_cpmg": config.n_cpmg,
     "reps": config.reps,
     "laser_mW": cfg["optics"]["excitation_laser_power_mW"],
@@ -151,9 +155,13 @@ if PLOT_DEBUG_RAW:
     plot_debug_traces(
         x_axis,
         traces,
-        x_label="Tau (ftus)",
+        x_label=r"$\tau$ (ftus)",
         y_label="Counts/s" if PLOT_USE_COUNTS_S else "Counts",
-        title=f"CPMG-XY Debug Raw | {timestamp}",
+        title=(
+            f"CPMG-XY Debug Raw | "
+            f"$\\pi/2_y - \\{{\\tau - \\pi_{{XY8}} - \\tau\\}}\\times N - \\pi/2_{{-y}}$ "
+            f"| phase XYXYYXYX | {timestamp}"
+        ),
         metadata=metadata,
         metadata_position=PLOT_METADATA_POSITION,
     )
@@ -161,8 +169,12 @@ if PLOT_DEBUG_RAW:
 fig, _, _, _ = plot_contrast_twin(
     x_axis,
     traces,
-    x_label="Tau (ftus)",
-    title=f"CPMG-XY | {timestamp}",
+    x_label=r"$\tau$ (ftus)",
+    title=(
+        f"CPMG-XY | "
+        f"$\\pi/2_y - \\{{\\tau - \\pi_{{XY8}} - \\tau\\}}\\times N - \\pi/2_{{-y}}$ "
+        f"| phase XYXYYXYX | {timestamp}"
+    ),
     metadata=metadata,
     metadata_position=PLOT_METADATA_POSITION,
 )

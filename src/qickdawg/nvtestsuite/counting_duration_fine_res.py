@@ -203,4 +203,3 @@ class CountingDurationFineRes(NVAveragerProgram, ReadoutHelpers):
             plt.text(430, 407, "readout_reference_start = {} us".format(
                 int(cfg.readout_reference_start_tus)), fontsize=14)
             plt.title("           Rabi Oscillation Pulse Sequence", fontsize=20)
-

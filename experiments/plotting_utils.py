@@ -17,6 +17,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
+# Shared palette across experiment plots.
+SIGNAL_COLOR = "tab:blue"
+REFERENCE_COLOR = "tab:orange"
+CONTRAST_COLOR = "tab:green"
+STEADY_SIGNAL_COLOR = "tab:purple"
+STEADY_REFERENCE_COLOR = "tab:red"
+
+
 def _get_channel_array(data: Any, base_name: str, use_counts_s: bool) -> Optional[np.ndarray]:
     """Extract one channel as a 1D float array if present, else None."""
     preferred = f"{base_name}_cts_s" if use_counts_s else base_name
@@ -84,11 +92,42 @@ def format_metadata_lines(metadata: Optional[Mapping[str, Any]]) -> Optional[str
     if not metadata:
         return None
 
+    hidden_keys = {"sequence", "xy8_phase_order"}
+
+    key_label_map = {
+        "pi2_ftns": r"$\pi/2$",
+        "pi2_ftsamp": r"$\pi/2$ (samples)",
+        "mw_pi2_ftns": r"mw $\pi/2$",
+        "mw_pi2_ftsamp": r"mw $\pi/2$ (samples)",
+        "pi_ftns": r"$\pi$",
+        "pi_ftsamp": r"$\pi$ (samples)",
+    }
+
+    def pretty_key(key: str) -> str:
+        if key in key_label_map:
+            return key_label_map[key]
+
+        # Drop ft* nomenclature in display labels for readability.
+        label = key
+        label = label.replace("_ftns", "_ns")
+        label = label.replace("_ftus", "_us")
+        label = label.replace("_ftsamp", "_samples")
+        return label
+
+    def pretty_pair(key: str, value: Any) -> str:
+        label = pretty_key(key)
+        # For pi pulse widths, prefer explicit physical units in the rendered text.
+        if key in {"pi2_ftns", "mw_pi2_ftns", "pi_ftns"}:
+            return f"{label}={value} ns"
+        return f"{label}={value}"
+
     parts = []
     for key, value in metadata.items():
+        if key in hidden_keys:
+            continue
         if value is None:
             continue
-        parts.append(f"{key}={value}")
+        parts.append(pretty_pair(str(key), value))
 
     if not parts:
         return None
@@ -106,6 +145,23 @@ def _add_metadata_text(fig: plt.Figure, metadata_text: Optional[str], position: 
         fig.text(0.5, 0.01, metadata_text, ha="center", va="bottom", fontsize=8.5)
 
 
+def _add_sequence_text(ax: plt.Axes, sequence_text: Optional[str]) -> None:
+    """Render a pulse-sequence annotation inside the plot area."""
+    if not sequence_text:
+        return
+
+    ax.text(
+        0.01,
+        0.98,
+        f"Sequence: {sequence_text}",
+        transform=ax.transAxes,
+        ha="left",
+        va="top",
+        fontsize=9.0,
+        bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.7, "edgecolor": "none"},
+    )
+
+
 def plot_debug_traces(
     x_axis: np.ndarray,
     traces: Mapping[str, Optional[np.ndarray]],
@@ -114,6 +170,7 @@ def plot_debug_traces(
     y_label: str,
     title: str,
     metadata: Optional[Mapping[str, Any]] = None,
+    sequence_text: Optional[str] = None,
     metadata_position: str = "bottom",
     figsize: tuple[float, float] = (10.0, 4.8),
 ) -> tuple[plt.Figure, plt.Axes]:
@@ -123,10 +180,18 @@ def plot_debug_traces(
     fig, ax = plt.subplots(figsize=figsize)
 
     style = {
-        "signal1": {"color": "tab:blue", "label": "signal1"},
-        "signal2": {"color": "tab:orange", "label": "signal2"},
-        "reference1": {"color": "tab:green", "label": "reference1"},
-        "reference2": {"color": "tab:red", "label": "reference2"},
+        "signal1": {"color": SIGNAL_COLOR, "label": "signal", "linestyle": "-"},
+        "signal2": {"color": REFERENCE_COLOR, "label": "reference", "linestyle": "-"},
+        "reference1": {
+            "color": STEADY_SIGNAL_COLOR,
+            "label": "steady state (signal)",
+            "linestyle": "--",
+        },
+        "reference2": {
+            "color": STEADY_REFERENCE_COLOR,
+            "label": "steady state (reference)",
+            "linestyle": "--",
+        },
     }
 
     for key in ("signal1", "signal2", "reference1", "reference2"):
@@ -136,11 +201,12 @@ def plot_debug_traces(
         ax.plot(
             x_axis,
             arr,
-            "o-",
+            "o",
             markersize=4.0,
             linewidth=1.1,
             alpha=0.9,
             color=style[key]["color"],
+            linestyle=style[key]["linestyle"],
             label=style[key]["label"],
         )
 
@@ -149,6 +215,7 @@ def plot_debug_traces(
     ax.set_title(title)
     ax.grid(alpha=0.25)
     ax.legend(loc="best", framealpha=0.95)
+    _add_sequence_text(ax, sequence_text)
 
     metadata_text = format_metadata_lines(metadata)
     _add_metadata_text(fig, metadata_text, metadata_position)
@@ -171,6 +238,7 @@ def plot_contrast_twin(
     x_label: str,
     title: str,
     metadata: Optional[Mapping[str, Any]] = None,
+    sequence_text: Optional[str] = None,
     metadata_position: str = "bottom",
     figsize: tuple[float, float] = (10.0, 4.8),
     raw_alpha: float = 0.35,
@@ -202,7 +270,7 @@ def plot_contrast_twin(
             markersize=5.0,
             linewidth=1.2,
             alpha=0.9,
-            color="tab:green",
+            color=CONTRAST_COLOR,
             label="contrast ratio",
         )
 
@@ -226,8 +294,8 @@ def plot_contrast_twin(
                 markersize=4.0,
                 linewidth=1.1,
                 alpha=raw_alpha,
-                color="tab:blue",
-                label="signal1",
+                color=SIGNAL_COLOR,
+                label="signal",
             )
 
         if signal2 is not None:
@@ -238,8 +306,8 @@ def plot_contrast_twin(
                 markersize=4.0,
                 linewidth=1.1,
                 alpha=raw_alpha,
-                color="tab:orange",
-                label="signal2",
+                color=REFERENCE_COLOR,
+                label="reference",
             )
 
     ax_left.set_xlabel(x_label)
@@ -249,6 +317,7 @@ def plot_contrast_twin(
 
     ax_left.set_title(title)
     ax_left.grid(alpha=0.25)
+    _add_sequence_text(ax_left, sequence_text)
 
     if lines:
         labels = [line.get_label() for line in lines]

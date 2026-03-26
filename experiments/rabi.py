@@ -35,21 +35,21 @@ from plotting_utils import (
 # Sweep bounds in nanoseconds.
 # NVConfiguration handles conversion to ftsamp/treg companion units.
 MW_DURATION_START_NS = 50     # ns
-MW_DURATION_STOP_NS  = 300 #2000    # ns
-MW_DURATION_DELTA_NS = 5      # ns  (step size)
+MW_DURATION_STOP_NS  = 600 //4 #2000    # ns
+MW_DURATION_DELTA_NS = 10      # ns  (step size)
 
-REPS          = 50000 #150000
+REPS          = 150000
 
 # Transition — set to "lower_dip", "upper_dip", or None to use config.yaml default.
 TRANSITION    = None   # None = use calibration.default_transition
 
 # Optional per-run overrides. If left None, values come from transition calibration.
 OVERRIDE_FREQ_MHZ = None   # e.g. 1845.7
-OVERRIDE_MW_GAIN  = None   # e.g. 20000
+OVERRIDE_MW_GAIN  = None   # e.g. 1200
 
 GET_REFERENCE = True          # acquire reference readout with MW gain = 0
 PLOT_USE_COUNTS_S = True
-PLOT_DEBUG_RAW = False
+PLOT_DEBUG_RAW = True
 PLOT_METADATA_POSITION = "top"
 
 OUTPUT_DIR = Path(__file__).parent.parent / "data" / "rabi"
@@ -107,6 +107,7 @@ out_path, timestamp = save_experiment_hdf5(
     OUTPUT_DIR,
     experiment_name="rabi_fine_res",
 )
+run_id = out_path.stem
 
 print(f"[rabi] Saved → {out_path}")
 
@@ -236,6 +237,7 @@ def _fit_rabi_contrast(x_axis_ns: np.ndarray, y: np.ndarray):
         return None
 
 metadata = {
+    "run_id": run_id,
     "mw_MHz": f"{config.mw_fMHz:.3f}",
     "gain": config.mw_gain,
     "reps": config.reps,
