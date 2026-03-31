@@ -246,6 +246,10 @@ def plot_contrast_twin(
     fit_y: Optional[np.ndarray] = None,
     fit_label: str = "fit",
     fit_kwargs: Optional[Mapping[str, Any]] = None,
+    contrast_label: str = "contrast ratio",
+    left_ylabel: str = "Contrast ratio",
+    signal1_label: str = "signal",
+    signal2_label: str = "reference",
 ) -> tuple[plt.Figure, plt.Axes, Optional[plt.Axes], list[Any]]:
     """
     Plot contrast on left y-axis and signal/reference on right y-axis.
@@ -271,7 +275,7 @@ def plot_contrast_twin(
             linewidth=1.2,
             alpha=0.9,
             color=CONTRAST_COLOR,
-            label="contrast ratio",
+            label=contrast_label,
         )
 
     if fit_x is not None and fit_y is not None:
@@ -295,7 +299,7 @@ def plot_contrast_twin(
                 linewidth=1.1,
                 alpha=raw_alpha,
                 color=SIGNAL_COLOR,
-                label="signal",
+                label=signal1_label,
             )
 
         if signal2 is not None:
@@ -307,11 +311,11 @@ def plot_contrast_twin(
                 linewidth=1.1,
                 alpha=raw_alpha,
                 color=REFERENCE_COLOR,
-                label="reference",
+                label=signal2_label,
             )
 
     ax_left.set_xlabel(x_label)
-    ax_left.set_ylabel("Contrast ratio")
+    ax_left.set_ylabel(left_ylabel)
     if ax_right is not None:
         ax_right.set_ylabel("Counts/s")
 

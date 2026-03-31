@@ -35,10 +35,10 @@ from plotting_utils import (
 # Sweep bounds in nanoseconds.
 # NVConfiguration handles conversion to ftsamp/treg companion units.
 MW_DURATION_START_NS = 50     # ns
-MW_DURATION_STOP_NS  = 600 //4 #2000    # ns
-MW_DURATION_DELTA_NS = 10      # ns  (step size)
+MW_DURATION_STOP_NS  = 600    #2000    # ns
+MW_DURATION_DELTA_NS = 5     # ns  (step size)
 
-REPS          = 150000
+REPS          = 150000*2 # 4
 
 # Transition — set to "lower_dip", "upper_dip", or None to use config.yaml default.
 TRANSITION    = None   # None = use calibration.default_transition

@@ -19,3 +19,5 @@ src/nvtestsuite/ (mixed with one non fine res script i wrote for pulsed odmr)
 experiments/
 and jupyter notebooks (mixed with all other notebooks)
 nvpulsing/nvconfiguration.py (made edits which are critical to current fine timing implementation)
+
+Make run summary less useless (currrently features a majority of useless information and useful information isn't easily comparable)

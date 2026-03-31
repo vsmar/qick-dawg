@@ -61,9 +61,9 @@ timing:
   relax_delay_tus: 2
   mw_to_laser_delay_tns: 555
   laser_on_tus: 6 # 4
-  readout_integration_tns: 680 # 430
-  laser_readout_offset_tus: 1.169 # 1.16
-  readout_reference_start_tus: 3.5
+  readout_integration_tns: 622 # 430
+  laser_readout_offset_tus: 1.159 # 1.16
+  readout_reference_start_tus: 5.0
 
 
 # -----------------------------------------------------------------------------

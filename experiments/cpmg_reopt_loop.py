@@ -34,7 +34,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 import qickdawg as qd
-from qickdawg.nvtestsuite.cpmg_xy_subnano_fine_res_test import CPMGXYFineRes
+from qickdawg.nvtestsuite.cpmg_xy_subnano_fine_res import CPMGXYFineRes
 
 from config import (
     build_nv_config,
@@ -95,8 +95,8 @@ from qdlutils.applications.qdlscan.reoptimizer import AxisOptimizationResult, Re
 # =============================================================================
 # CPMG chunk parameters (same spirit as experiments/cpmg.py)
 # =============================================================================
-TAU_START_FTNS = 6_000 # 2_700.0
-TAU_STOP_FTNS = 10_000 # 3_500.0
+TAU_START_FTNS = 200.0
+TAU_STOP_FTNS = 13_000.0
 TAU_DELTA_FTNS = 5
 
 N_CPMG = 32
@@ -109,8 +109,8 @@ OVERRIDE_MW_PI2_FTSAMP = None
 OVERRIDE_MW_PI2_FTNS = None
 
 # If TARGET_TOTAL_REPS is not divisible by CHUNK_REPS, the final chunk uses remainder reps.
-TARGET_TOTAL_REPS = 100000 # 1_000
-CHUNK_REPS = 3000
+TARGET_TOTAL_REPS = 27_000
+CHUNK_REPS = 1_000
 
 
 def _env_flag_true(name: str, default: bool = False) -> bool:
@@ -122,6 +122,8 @@ def _env_flag_true(name: str, default: bool = False) -> bool:
 
 # Respect shell-level progress toggles for long terminal runs.
 ACQUIRE_PROGRESS = not _env_flag_true("TQDM_DISABLE", default=False)
+ACQUIRE_MAX_RETRIES = 5
+ACQUIRE_RETRY_DELAY_S = 5.0
 
 # =============================================================================
 # Reoptimization parameters
@@ -139,7 +141,7 @@ AXIS_LIMITS_UM = {
 }
 
 # Startup and move-safety controls for reoptimization
-INITIAL_POSITION_UM: Optional[Tuple[float, float, float]] = (-2.6222, -0.1904, -4.43081)
+INITIAL_POSITION_UM: Optional[Tuple[float, float, float]] = (-2.298223, -0.038856, -4.01095)
 ALLOW_UNSEEDED_REOPT_START = False
 REQUIRE_FIT_SUCCESS_FOR_AXIS_MOVE = True
 MIN_AXIS_IMPROVEMENT_CTS_S = 0.0
@@ -184,6 +186,18 @@ def _to_optional_float(value: Any) -> Optional[float]:
         return float(value)
     except Exception:
         return None
+
+
+def _is_retryable_acquire_error(exc: Exception) -> bool:
+    """Heuristic for transient acquisition/poll failures."""
+    msg = str(exc)
+    if "NoneType" in msg and "subscriptable" in msg:
+        return True
+    if "data size mismatch" in msg:
+        return True
+    if "got too much data" in msg:
+        return True
+    return False
 
 
 def _load_seed_position_from_previous_run(output_root: Path) -> Optional[Tuple[float, float, float]]:
@@ -458,20 +472,21 @@ def _save_chunk_cts_plot(
 def _save_cumulative_plot(
     tau_ftns: np.ndarray,
     signal_avg: np.ndarray,
-    reference_avg: np.ndarray,
+    denominator_avg: np.ndarray,
     cycle_index: int,
     run_id: str,
     out_path: Path,
+    denominator_label: str,
 ) -> None:
     """Save cumulative weighted-average contrast-focused twin plot."""
-    contrast = signal_avg / np.clip(reference_avg, 1e-12, None)
+    signal_over_steady_state = signal_avg / np.clip(denominator_avg, 1e-12, None)
 
     traces = {
         "signal1": signal_avg,
-        "signal2": reference_avg,
+        "signal2": denominator_avg,
         "reference1": None,
         "reference2": None,
-        "contrast": contrast,
+        "contrast": signal_over_steady_state,
     }
 
     fig, _, _, _ = plot_contrast_twin(
@@ -492,6 +507,10 @@ def _save_cumulative_plot(
         },
         metadata_position="bottom",
         raw_alpha=0.3,
+        contrast_label="signal/steady_state",
+        left_ylabel="Signal/steady_state",
+        signal1_label="signal1",
+        signal2_label=denominator_label,
     )
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
@@ -772,7 +791,7 @@ def run_cpmg_reopt_loop() -> Dict[str, Any]:
     cycle_rows: List[Dict[str, Any]] = []
     cumulative_tau_ftns: Optional[np.ndarray] = None
     cumulative_signal1_weighted: Optional[np.ndarray] = None
-    cumulative_signal2_weighted: Optional[np.ndarray] = None
+    cumulative_denominator_weighted: Optional[np.ndarray] = None
     cumulative_weight = 0.0
 
     print(
@@ -796,7 +815,51 @@ def run_cpmg_reopt_loop() -> Dict[str, Any]:
         )
 
         prog = CPMGXYFineRes(config)
-        data = prog.acquire(progress=ACQUIRE_PROGRESS)
+        last_acquire_error: Optional[Exception] = None
+        data = None
+
+        for attempt in range(1, ACQUIRE_MAX_RETRIES + 2):
+            try:
+                data = prog.acquire(progress=ACQUIRE_PROGRESS)
+                if attempt > 1:
+                    print(f"[acquire] cycle={cycle_index} recovered on attempt {attempt}")
+                break
+            except Exception as exc:
+                last_acquire_error = exc
+                retryable = _is_retryable_acquire_error(exc)
+                has_next_attempt = attempt < (ACQUIRE_MAX_RETRIES + 1)
+
+                _append_manifest_line(
+                    manifest_path,
+                    {
+                        "event": "acquire_error",
+                        "run_id": run_id,
+                        "cycle_index": cycle_index,
+                        "attempt": attempt,
+                        "retryable": retryable,
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    },
+                )
+
+                if not (retryable and has_next_attempt):
+                    print(
+                        f"[acquire] cycle={cycle_index} failed on attempt {attempt}; "
+                        f"retryable={retryable}. Aborting run."
+                    )
+                    raise
+
+                print(
+                    f"[acquire] cycle={cycle_index} transient error on attempt {attempt} "
+                    f"({type(exc).__name__}: {exc}); retrying in {ACQUIRE_RETRY_DELAY_S:.1f}s"
+                )
+                time.sleep(ACQUIRE_RETRY_DELAY_S)
+                # Rebuild program to avoid stale hardware/readout state between attempts.
+                prog = CPMGXYFineRes(config)
+
+        if data is None:
+            # Defensive guard: should be unreachable if exceptions are raised correctly.
+            raise RuntimeError(f"acquire() returned no data for cycle={cycle_index}") from last_acquire_error
 
         custom_attrs = {
             "loop_run_id": run_id,
@@ -838,31 +901,43 @@ def run_cpmg_reopt_loop() -> Dict[str, Any]:
             )
 
             s1 = chunk_series.get("signal1_cts_s")
-            s2 = chunk_series.get("signal2_cts_s")
-            if s1 is not None and s2 is not None and s1.shape == tau_ftns.shape and s2.shape == tau_ftns.shape:
+            if bool(config.get_reference):
+                denominator = chunk_series.get("signal2_cts_s")
+                denominator_label = "signal2"
+            else:
+                denominator = chunk_series.get("reference1_cts_s")
+                denominator_label = "reference1"
+
+            if (
+                s1 is not None
+                and denominator is not None
+                and s1.shape == tau_ftns.shape
+                and denominator.shape == tau_ftns.shape
+            ):
                 if cumulative_tau_ftns is None:
                     cumulative_tau_ftns = tau_ftns.copy()
                     cumulative_signal1_weighted = np.zeros_like(s1, dtype=float)
-                    cumulative_signal2_weighted = np.zeros_like(s2, dtype=float)
+                    cumulative_denominator_weighted = np.zeros_like(denominator, dtype=float)
 
                 if cumulative_tau_ftns.shape == tau_ftns.shape and np.allclose(cumulative_tau_ftns, tau_ftns):
                     assert cumulative_signal1_weighted is not None
-                    assert cumulative_signal2_weighted is not None
+                    assert cumulative_denominator_weighted is not None
 
                     cumulative_signal1_weighted += chunk_reps * s1
-                    cumulative_signal2_weighted += chunk_reps * s2
+                    cumulative_denominator_weighted += chunk_reps * denominator
                     cumulative_weight += float(chunk_reps)
 
                     if cumulative_weight > 0:
                         signal_avg = cumulative_signal1_weighted / cumulative_weight
-                        reference_avg = cumulative_signal2_weighted / cumulative_weight
+                        denominator_avg = cumulative_denominator_weighted / cumulative_weight
                         _save_cumulative_plot(
                             tau_ftns=cumulative_tau_ftns,
                             signal_avg=signal_avg,
-                            reference_avg=reference_avg,
+                            denominator_avg=denominator_avg,
                             cycle_index=cycle_index,
                             run_id=run_id,
                             out_path=cumulative_plot_path,
+                            denominator_label=denominator_label,
                         )
                         cumulative_plot_saved = True
 

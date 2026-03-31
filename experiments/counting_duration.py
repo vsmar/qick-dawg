@@ -14,6 +14,7 @@ from copy import copy
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from tqdm.auto import tqdm
 
 from qickdawg.nvtestsuite.counting_duration_fine_res import CountingDurationFineRes
 
@@ -29,7 +30,7 @@ from config import (
 # =============================================================================
 
 READOUT_OFFSET_START_TNS = 1000
-READOUT_OFFSET_STOP_TNS = 2300
+READOUT_OFFSET_STOP_TNS = 2500
 READOUT_OFFSET_STEP_TNS = 10
 
 REPS = 200_000
@@ -53,10 +54,19 @@ def _as_scalar(value):
     return float(np.mean(arr))
 
 
-def _acquire_full_res(config, delays_tns):
+def _acquire_full_res(config, delays_tns, show_progress=True):
     results = None
 
-    for delay_tns in delays_tns:
+    total_steps = len(delays_tns)
+    sweep_iter = tqdm(
+        delays_tns,
+        total=total_steps,
+        desc="Counting-duration sweep",
+        unit="step",
+        disable=not show_progress,
+    )
+
+    for idx, delay_tns in enumerate(sweep_iter, start=1):
         config.laser_readout_offset_tns = int(delay_tns)
 
         prog = CountingDurationFineRes(config)
@@ -72,6 +82,11 @@ def _acquire_full_res(config, delays_tns):
             results[key] = np.append(results[key], _as_scalar(value))
 
         results.delay = np.append(results.delay, config.laser_readout_offset_tus)
+
+        sweep_iter.set_postfix({
+            "offset_ns": int(delay_tns),
+            "done": f"{idx}/{total_steps}",
+        }, refresh=False)
 
     return results
 
@@ -238,6 +253,18 @@ def optimize_counting_duration(df, t_min=0.0, threshold_pct=10.0, run_id=None):
     }
 
 
+def _save_analysis_figures(analysis, out_path):
+    out_path = Path(out_path)
+    data_fig_path = out_path.with_name(f"{out_path.stem}_raw_and_subtracted.png")
+    snr_fig_path = out_path.with_name(f"{out_path.stem}_snr.png")
+
+    analysis["fig_data"].savefig(data_fig_path, dpi=300, bbox_inches="tight")
+    analysis["fig_snr"].savefig(snr_fig_path, dpi=300, bbox_inches="tight")
+
+    print(f"Saved figure: {data_fig_path}")
+    print(f"Saved figure: {snr_fig_path}")
+
+
 # =============================================================================
 # Main execution
 # =============================================================================
@@ -270,12 +297,13 @@ def main():
     run_id = out_path.stem
 
     df = _results_to_dataframe(results)
-    optimize_counting_duration(
+    analysis = optimize_counting_duration(
         df,
         t_min=float(T_MIN_S),
         threshold_pct=float(THRESHOLD_PCT),
         run_id=run_id,
     )
+    _save_analysis_figures(analysis, out_path)
 
     plt.show()
 

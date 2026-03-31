@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
-from qickdawg.nvtestsuite.cpmg_xy_subnano_fine_res_test import CPMGXYFineRes
+from qickdawg.nvtestsuite.cpmg_xy_subnano_fine_res import CPMGXYFineRes
 
 from config import (
     load_config,
@@ -31,12 +31,12 @@ from plotting_utils import (
 # =============================================================================
 
 # Sweep bounds in fine-time nanoseconds (ftns).
-TAU_START_FTNS = 6_000 # 2_700.0
-TAU_STOP_FTNS = 10_000 # 3_500.0
+TAU_START_FTNS = 200.0
+TAU_STOP_FTNS = 13_000.0
 TAU_DELTA_FTNS = 5
 
-N_CPMG = 32  # 32
-REPS = 3000
+N_CPMG = 32  # 128
+REPS = 1000
 
 # Transition — set to "lower_dip", "upper_dip", or None to use config default.
 TRANSITION = None
