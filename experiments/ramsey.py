@@ -45,7 +45,7 @@ REPS = 80_000
 TRANSITION = None
 
 # Optional per-run overrides. If None, values come from selected transition.
-OVERRIDE_FREQ_MHZ = 1845.8
+OVERRIDE_FREQ_MHZ = None
 OVERRIDE_MW_GAIN = None
 OVERRIDE_MW_PI2_FTSAMP = None
 OVERRIDE_MW_PI2_FTNS = None

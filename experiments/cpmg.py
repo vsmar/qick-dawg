@@ -32,11 +32,11 @@ from plotting_utils import (
 
 # Sweep bounds in fine-time nanoseconds (ftns).
 TAU_START_FTNS = 200.0
-TAU_STOP_FTNS = 13_000.0
+TAU_STOP_FTNS = 9_000.0
 TAU_DELTA_FTNS = 5
 
 N_CPMG = 32  # 128
-REPS = 1000
+REPS = 2000
 
 # Transition — set to "lower_dip", "upper_dip", or None to use config default.
 TRANSITION = None

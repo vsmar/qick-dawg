@@ -96,7 +96,7 @@ from qdlutils.applications.qdlscan.reoptimizer import AxisOptimizationResult, Re
 # CPMG chunk parameters (same spirit as experiments/cpmg.py)
 # =============================================================================
 TAU_START_FTNS = 200.0
-TAU_STOP_FTNS = 13_000.0
+TAU_STOP_FTNS = 9_000.0
 TAU_DELTA_FTNS = 5
 
 N_CPMG = 32
@@ -109,8 +109,8 @@ OVERRIDE_MW_PI2_FTSAMP = None
 OVERRIDE_MW_PI2_FTNS = None
 
 # If TARGET_TOTAL_REPS is not divisible by CHUNK_REPS, the final chunk uses remainder reps.
-TARGET_TOTAL_REPS = 27_000
-CHUNK_REPS = 1_000
+TARGET_TOTAL_REPS = 100_000
+CHUNK_REPS = 2_000
 
 
 def _env_flag_true(name: str, default: bool = False) -> bool:
@@ -141,7 +141,7 @@ AXIS_LIMITS_UM = {
 }
 
 # Startup and move-safety controls for reoptimization
-INITIAL_POSITION_UM: Optional[Tuple[float, float, float]] = (-2.298223, -0.038856, -4.01095)
+INITIAL_POSITION_UM: Optional[Tuple[float, float, float]] = (-2.2799, 0.7189, -2.859334)
 ALLOW_UNSEEDED_REOPT_START = False
 REQUIRE_FIT_SUCCESS_FOR_AXIS_MOVE = True
 MIN_AXIS_IMPROVEMENT_CTS_S = 0.0

@@ -88,8 +88,8 @@ calibration:
     mw_fMHz: 1845.8 # 1845.7
     mw_nqz: 1
     mw_gain: 32767                # 32767 is max
-    mw_pi2_ftsamp: 132
-    mw_pi_ftsamp: 262              # set after Rabi calibration at this frequency
+    mw_pi2_ftsamp: 134
+    mw_pi_ftsamp: 268              # set after Rabi calibration at this frequency
 
 
   upper_dip:                        # ms = +1 transition
