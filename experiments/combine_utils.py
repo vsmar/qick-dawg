@@ -1,5 +1,5 @@
 """
-Utilities for combining chunk-level CPMG HDF5 outputs.
+Generic utilities for combining chunk-level experiment HDF5 outputs.
 
 Combined output conventions:
 - /data holds regular-run-compatible aggregated datasets.
@@ -11,10 +11,26 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import h5py
 import numpy as np
+
+
+AXIS_CANDIDATES = [
+    "tau_ftns",
+    "tau_ftus",
+    "tau_tus",
+    "mw_duration_ftns",
+    "mw_duration_ns",
+    "mw_fMHz",
+    "t1_delay_tns",
+    "t1_delay_tus",
+]
+
+SIGNAL_CANDIDATES = ["signal1_cts_s", "signal1"]
+REFERENCE_CANDIDATES = ["signal2_cts_s", "signal2"]
+CONTRAST_CANDIDATES = ["contrast"]
 
 
 def _read_chunk_experiment_attrs(chunk_file: Path) -> Dict[str, object]:
@@ -26,13 +42,14 @@ def _read_chunk_experiment_attrs(chunk_file: Path) -> Dict[str, object]:
     return attrs
 
 
-def combine_chunk_hdf5_files(summary_csv_path: Path, out_path: Path) -> None:
-    """
-    Combine chunk-level HDF5 files into a single weighted-average dataset.
+def _first_dataset(dgrp: h5py.Group, candidates: List[str]) -> tuple[Optional[str], Optional[np.ndarray]]:
+    for name in candidates:
+        if name in dgrp:
+            return name, np.asarray(dgrp[name], dtype=float)
+    return None, None
 
-    Weights are chunk reps, so this approximates an equivalent single run with
-    TARGET_TOTAL_REPS when all chunks share the same sweep axis.
-    """
+
+def combine_chunk_hdf5_files(summary_csv_path: Path, out_path: Path) -> None:
     rows: List[Dict[str, str]] = []
     with open(summary_csv_path, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -44,12 +61,15 @@ def combine_chunk_hdf5_files(summary_csv_path: Path, out_path: Path) -> None:
         print("[combine] no valid chunk files found; skipping combined output")
         return
 
+    axis_name = None
     x_axis = None
-    weighted_signals = None
-    weighted_refs = None
+    weighted_signal = None
+    weighted_reference = None
+    weighted_contrast = None
     total_weight = 0.0
 
     chunk_sources: List[Dict[str, object]] = []
+
     for row in valid_rows:
         chunk_file = Path(row["chunk_file"])
         weight = float(row.get("chunk_reps", 0) or 0)
@@ -59,44 +79,46 @@ def combine_chunk_hdf5_files(summary_csv_path: Path, out_path: Path) -> None:
         with h5py.File(chunk_file, "r") as hf:
             if "data" not in hf:
                 continue
-
             dgrp = hf["data"]
 
-            if "tau_ftns" not in dgrp:
-                raise ValueError(f"Chunk file missing required tau_ftns axis dataset: {chunk_file}")
-            this_x = np.asarray(dgrp["tau_ftns"], dtype=float)
+            this_axis_name, this_x = _first_dataset(dgrp, AXIS_CANDIDATES)
+            if this_axis_name is None or this_x is None:
+                raise ValueError(f"Chunk file missing known sweep axis dataset: {chunk_file}")
 
-            if "signal1_cts_s" in dgrp:
-                this_signal = np.asarray(dgrp["signal1_cts_s"], dtype=float)
-            elif "signal1" in dgrp:
-                this_signal = np.asarray(dgrp["signal1"], dtype=float)
-            else:
+            _, this_signal = _first_dataset(dgrp, SIGNAL_CANDIDATES)
+            if this_signal is None:
                 raise ValueError(f"Chunk file missing signal dataset: {chunk_file}")
 
-            if "signal2_cts_s" in dgrp:
-                this_ref = np.asarray(dgrp["signal2_cts_s"], dtype=float)
-            elif "signal2" in dgrp:
-                this_ref = np.asarray(dgrp["signal2"], dtype=float)
-            else:
-                this_ref = None
+            _, this_reference = _first_dataset(dgrp, REFERENCE_CANDIDATES)
+            _, this_contrast = _first_dataset(dgrp, CONTRAST_CANDIDATES)
 
-        if x_axis is None:
+        if axis_name is None:
+            axis_name = this_axis_name
             x_axis = this_x
-            weighted_signals = np.zeros_like(this_signal, dtype=float)
-            weighted_refs = np.zeros_like(this_ref, dtype=float) if this_ref is not None else None
+            weighted_signal = np.zeros_like(this_signal, dtype=float)
+            weighted_reference = np.zeros_like(this_reference, dtype=float) if this_reference is not None else None
+            weighted_contrast = np.zeros_like(this_contrast, dtype=float) if this_contrast is not None else None
         else:
+            if this_axis_name != axis_name:
+                raise ValueError("Cannot combine chunks with different sweep axis names.")
             if this_x.shape != x_axis.shape or not np.allclose(this_x, x_axis):
-                raise ValueError("Cannot combine chunks with different tau axis values.")
-            if this_signal.shape != weighted_signals.shape:
-                raise ValueError("Cannot combine chunks with different signal shape.")
-            if (this_ref is None) != (weighted_refs is None):
-                raise ValueError("Cannot combine mixed presence/absence of reference signal.")
-            if this_ref is not None and this_ref.shape != weighted_refs.shape:
-                raise ValueError("Cannot combine chunks with different reference shape.")
+                raise ValueError("Cannot combine chunks with different sweep axis values.")
+            if this_signal.shape != weighted_signal.shape:
+                raise ValueError("Cannot combine chunks with different signal shapes.")
+            if (this_reference is None) != (weighted_reference is None):
+                weighted_reference = None
+            if weighted_reference is not None and this_reference is not None and this_reference.shape != weighted_reference.shape:
+                raise ValueError("Cannot combine chunks with different reference shapes.")
+            if (this_contrast is None) != (weighted_contrast is None):
+                weighted_contrast = None
+            if weighted_contrast is not None and this_contrast is not None and this_contrast.shape != weighted_contrast.shape:
+                raise ValueError("Cannot combine chunks with different contrast shapes.")
 
-        weighted_signals += weight * this_signal
-        if weighted_refs is not None and this_ref is not None:
-            weighted_refs += weight * this_ref
+        weighted_signal += weight * this_signal
+        if weighted_reference is not None and this_reference is not None:
+            weighted_reference += weight * this_reference
+        if weighted_contrast is not None and this_contrast is not None:
+            weighted_contrast += weight * this_contrast
         total_weight += weight
 
         chunk_sources.append(
@@ -109,27 +131,33 @@ def combine_chunk_hdf5_files(summary_csv_path: Path, out_path: Path) -> None:
             }
         )
 
-    if total_weight <= 0 or x_axis is None or weighted_signals is None:
+    if total_weight <= 0 or x_axis is None or weighted_signal is None or axis_name is None:
         print("[combine] no weighted chunk data available; skipping combined output")
         return
 
-    signal_avg = weighted_signals / total_weight
-    ref_avg = (weighted_refs / total_weight) if weighted_refs is not None else None
-    contrast_avg = signal_avg / np.clip(ref_avg, 1e-12, None) if ref_avg is not None else None
+    signal_avg = weighted_signal / total_weight
+    reference_avg = (weighted_reference / total_weight) if weighted_reference is not None else None
+
+    if weighted_contrast is not None:
+        contrast_avg = weighted_contrast / total_weight
+    elif reference_avg is not None:
+        contrast_avg = signal_avg / np.clip(reference_avg, 1e-12, None)
+    else:
+        contrast_avg = None
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with h5py.File(out_path, "w") as hf:
         dgrp = hf.create_group("data")
-        dgrp.create_dataset("tau_ftns", data=x_axis)
+        dgrp.create_dataset(axis_name, data=x_axis)
         dgrp.create_dataset("signal1_cts_s", data=signal_avg)
-        if ref_avg is not None:
-            dgrp.create_dataset("signal2_cts_s", data=ref_avg)
+        if reference_avg is not None:
+            dgrp.create_dataset("signal2_cts_s", data=reference_avg)
         if contrast_avg is not None:
             dgrp.create_dataset("contrast", data=contrast_avg)
 
         exp = hf.create_group("experiment")
         exp.attrs["combined_from_summary_csv"] = str(summary_csv_path)
-        exp.attrs["n_chunks_combined"] = len(valid_rows)
+        exp.attrs["n_chunks_combined"] = len(chunk_sources)
         exp.attrs["weighted_by"] = "chunk_reps"
 
         chunks_grp = hf.create_group("chunks")

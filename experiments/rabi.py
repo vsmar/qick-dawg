@@ -22,10 +22,16 @@ from config import (
     connect,
     save_experiment_hdf5,
 )
+from combine_utils import combine_chunk_hdf5_files
 from plotting_utils import (
     extract_standard_traces,
     plot_debug_traces,
     plot_contrast_twin,
+)
+from experiment_helpers import (
+    build_plot_metadata,
+    build_standard_title,
+    maybe_run_chunked_mode,
 )
 
 # =============================================================================
@@ -35,17 +41,24 @@ from plotting_utils import (
 # Sweep bounds in nanoseconds.
 # NVConfiguration handles conversion to ftsamp/treg companion units.
 MW_DURATION_START_NS = 50     # ns
-MW_DURATION_STOP_NS  = 800    #2000    # ns
-MW_DURATION_DELTA_NS = 5     # ns  (step size)
+MW_DURATION_STOP_NS  = 6000    #2000    # ns
+MW_DURATION_DELTA_NS = 50     # ns  (step size)
 
-REPS          = 150000*3 # 4
+REPS          = 150000*2 #*3 # 4
+
+RUN_MODE = "single"  # "single" or "chunked"
+TARGET_TOTAL_REPS = 300_000
+CHUNK_REPS = 50_000
+ACQUIRE_PROGRESS = True
+# Required in chunked mode to avoid startup piezo reset behavior.
+PIEZO_INITIAL_POSITION_UM = None  # e.g. (-2.2799, 0.7189, -2.8593)
 
 # Transition — set to "lower_dip", "upper_dip", or None to use config.yaml default.
 TRANSITION    = None   # None = use calibration.default_transition
 
 # Optional per-run overrides. If left None, values come from transition calibration.
 OVERRIDE_FREQ_MHZ = None   # e.g. 1845.7
-OVERRIDE_MW_GAIN  = None   # e.g. 1200
+OVERRIDE_MW_GAIN  = 600   # e.g. 1200
 
 GET_REFERENCE = True          # acquire reference readout with MW gain = 0
 PLOT_USE_COUNTS_S = True
@@ -54,6 +67,30 @@ PLOT_METADATA_POSITION = "top"
 
 OUTPUT_DIR = Path(__file__).parent.parent / "data" / "rabi"
 
+
+def _build_rabi_config(cfg: dict, reps: int):
+    config = build_nv_config(cfg)
+
+    active_transition = TRANSITION or cfg["calibration"]["default_transition"]
+    t = cfg["calibration"][active_transition]
+
+    # Resolve run parameters with precedence:
+    # explicit file override -> selected/default transition values.
+    config.mw_fMHz = OVERRIDE_FREQ_MHZ if OVERRIDE_FREQ_MHZ is not None else t["mw_fMHz"]
+    config.mw_gain = OVERRIDE_MW_GAIN if OVERRIDE_MW_GAIN is not None else t["mw_gain"]
+
+    config.reps = int(reps)
+    config.get_reference = bool(GET_REFERENCE)
+
+    config.add_linear_sweep(
+        "mw_duration",
+        "ftns",
+        start=MW_DURATION_START_NS,
+        stop=MW_DURATION_STOP_NS,
+        delta=MW_DURATION_DELTA_NS,
+    )
+    return config, active_transition
+
 # =============================================================================
 # Setup
 # =============================================================================
@@ -61,39 +98,52 @@ OUTPUT_DIR = Path(__file__).parent.parent / "data" / "rabi"
 cfg    = load_config()
 connect(cfg)
 
-config = build_nv_config(cfg)
+config, active_transition = _build_rabi_config(cfg, REPS)
 print(
     f"[rabi] Sweep: {MW_DURATION_START_NS:.3f} -> {MW_DURATION_STOP_NS:.3f} ns "
     f"(delta {MW_DURATION_DELTA_NS:.3f} ns)"
 )
-
-# Choose transition context: explicit TRANSITION, otherwise config default.
-active_transition = TRANSITION or cfg["calibration"]["default_transition"]
-t = cfg["calibration"][active_transition]
-
-# Resolve run parameters with precedence:
-# explicit file override -> selected/default transition values.
-config.mw_fMHz = OVERRIDE_FREQ_MHZ if OVERRIDE_FREQ_MHZ is not None else t["mw_fMHz"]
-config.mw_gain   = OVERRIDE_MW_GAIN  if OVERRIDE_MW_GAIN  is not None else t["mw_gain"]
-
 print(f"[rabi] Active transition: {active_transition} | freq={config.mw_fMHz} MHz | gain={config.mw_gain}")
-config.reps                = REPS
-config.get_reference       = GET_REFERENCE
 
-config.add_linear_sweep(
-    "mw_duration",
-    "ftns",
-    start=MW_DURATION_START_NS,
-    stop=MW_DURATION_STOP_NS,
-    delta=MW_DURATION_DELTA_NS,
-)
+
+def _build_chunk_config_context(reps: int):
+    chunk_cfg, chunk_transition = _build_rabi_config(cfg, reps)
+    return (
+        chunk_cfg,
+        {
+            "transition": chunk_transition,
+            "mw_duration_start_ns": float(MW_DURATION_START_NS),
+            "mw_duration_stop_ns": float(MW_DURATION_STOP_NS),
+            "mw_duration_delta_ns": float(MW_DURATION_DELTA_NS),
+        },
+    )
+
+
+if maybe_run_chunked_mode(
+    run_mode=RUN_MODE,
+    program_class=RabiFineRes,
+    cfg_dict=cfg,
+    build_config_for_chunk=_build_chunk_config_context,
+    output_dir=OUTPUT_DIR,
+    experiment_name="rabi_fine_res",
+    target_total_reps=int(TARGET_TOTAL_REPS),
+    chunk_reps=int(CHUNK_REPS),
+    acquire_progress=bool(ACQUIRE_PROGRESS),
+    piezo_initial_position_um=PIEZO_INITIAL_POSITION_UM,
+    combine_filename="rabi_fine_res_combined.h5",
+    combine_fn=combine_chunk_hdf5_files,
+):
+    raise SystemExit(0)
+
+if RUN_MODE != "single":
+    raise ValueError("RUN_MODE must be 'single' or 'chunked'.")
 
 # =============================================================================
 # Acquire
 # =============================================================================
 
 prog = RabiFineRes(config)
-data = prog.acquire(progress=True)
+data = prog.acquire(progress=bool(ACQUIRE_PROGRESS))
 
 # =============================================================================
 # Save to HDF5
@@ -236,14 +286,19 @@ def _fit_rabi_contrast(x_axis_ns: np.ndarray, y: np.ndarray):
     except (RuntimeError, ValueError):
         return None
 
-metadata = {
-    "run_id": run_id,
-    "mw_MHz": f"{config.mw_fMHz:.3f}",
-    "gain": config.mw_gain,
-    "reps": config.reps,
-    "laser_mW": cfg["optics"]["excitation_laser_power_mW"],
-    "units": "cts/s" if PLOT_USE_COUNTS_S else "raw",
-}
+metadata = build_plot_metadata(
+    program_class=RabiFineRes,
+    config_obj=config,
+    base_metadata={
+        "run_id": run_id,
+        "mw_MHz": f"{config.mw_fMHz:.3f}",
+        "gain": config.mw_gain,
+        "sequence": "mw_pulse - readout",
+        "reps": config.reps,
+        "laser_mW": cfg["optics"]["excitation_laser_power_mW"],
+        "units": "cts/s" if PLOT_USE_COUNTS_S else "raw",
+    },
+)
 
 if PLOT_DEBUG_RAW:
     plot_debug_traces(
@@ -251,7 +306,11 @@ if PLOT_DEBUG_RAW:
         traces,
         x_label="MW Pulse Duration (ns)",
         y_label="Counts/s" if PLOT_USE_COUNTS_S else "Counts",
-        title=f"Rabi Debug Raw | {timestamp}",
+        title=build_standard_title(
+            experiment_label="Rabi Debug Raw",
+            sequence_label="mw_pulse - readout",
+            run_id=run_id,
+        ),
         metadata=metadata,
         metadata_position=PLOT_METADATA_POSITION,
     )
@@ -301,7 +360,11 @@ fig, ax_left, _, _ = plot_contrast_twin(
     x_ns,
     traces,
     x_label="MW Pulse Duration (ns)",
-    title=f"Rabi | {timestamp}",
+    title=build_standard_title(
+        experiment_label="Rabi",
+        sequence_label="mw_pulse - readout",
+        run_id=run_id,
+    ),
     metadata=metadata,
     metadata_position=PLOT_METADATA_POSITION,
     fit_x=fit_x,

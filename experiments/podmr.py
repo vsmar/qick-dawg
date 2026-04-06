@@ -22,10 +22,16 @@ from config import (
     connect,
     save_experiment_hdf5,
 )
+from combine_utils import combine_chunk_hdf5_files
 from plotting_utils import (
     extract_standard_traces,
     plot_debug_traces,
     plot_contrast_twin,
+)
+from experiment_helpers import (
+    build_plot_metadata,
+    build_standard_title,
+    maybe_run_chunked_mode,
 )
 
 # =============================================================================
@@ -38,6 +44,13 @@ ODMR_STOP_MHZ = 1847.5
 ODMR_DELTA_MHZ = 0.05
 
 REPS = 200000
+
+RUN_MODE = "single"  # "single" or "chunked"
+TARGET_TOTAL_REPS = 600_000
+CHUNK_REPS = 200_000
+ACQUIRE_PROGRESS = True
+# Required in chunked mode to avoid startup piezo reset behavior.
+PIEZO_INITIAL_POSITION_UM = None  # e.g. (-2.2799, 0.7189, -2.8593)
 
 # Transition — set to "lower_dip", "upper_dip", or None to use config default.
 TRANSITION = None
@@ -56,42 +69,45 @@ PLOT_METADATA_POSITION = "bottom"
 
 OUTPUT_DIR = Path(__file__).parent.parent / "data" / "podmr"
 
+
+def _build_podmr_config(cfg: dict, reps: int):
+    config = build_nv_config(cfg)
+
+    active_transition = TRANSITION or cfg["calibration"]["default_transition"]
+    t = cfg["calibration"][active_transition]
+
+    config.mw_gain = OVERRIDE_MW_GAIN if OVERRIDE_MW_GAIN is not None else t["mw_gain"]
+
+    if OVERRIDE_MW_PI_FTSAMP is not None and OVERRIDE_MW_PI_NS is not None:
+        raise ValueError("Set only one of OVERRIDE_MW_PI_FTSAMP or OVERRIDE_MW_PI_NS.")
+
+    if OVERRIDE_MW_PI_FTSAMP is not None:
+        config.mw_pi_ftsamp = int(OVERRIDE_MW_PI_FTSAMP)
+        pi_source = f"OVERRIDE_MW_PI_FTSAMP={config.mw_pi_ftsamp}"
+    elif OVERRIDE_MW_PI_NS is not None:
+        config.mw_pi_ftns = float(OVERRIDE_MW_PI_NS)
+        pi_source = f"OVERRIDE_MW_PI_NS={OVERRIDE_MW_PI_NS} ns"
+    else:
+        if t.get("mw_pi_ftsamp") is None:
+            raise ValueError(
+                "No calibration pi pulse found for this transition. "
+                "Set OVERRIDE_MW_PI_FTSAMP (or OVERRIDE_MW_PI_NS)."
+            )
+        config.mw_pi_ftsamp = int(t["mw_pi_ftsamp"])
+        pi_source = f"calibration.{active_transition}.mw_pi_ftsamp={config.mw_pi_ftsamp}"
+
+    config.reps = int(reps)
+    config.get_reference = bool(GET_REFERENCE)
+    config.add_linear_sweep("mw", "fMHz", start=ODMR_START_MHZ, stop=ODMR_STOP_MHZ, delta=ODMR_DELTA_MHZ)
+    return config, active_transition, pi_source
+
 # =============================================================================
 # Setup
 # =============================================================================
 
 cfg = load_config()
 connect(cfg)
-
-config = build_nv_config(cfg)
-
-active_transition = TRANSITION or cfg["calibration"]["default_transition"]
-t = cfg["calibration"][active_transition]
-
-config.mw_gain = OVERRIDE_MW_GAIN if OVERRIDE_MW_GAIN is not None else t["mw_gain"]
-
-if OVERRIDE_MW_PI_FTSAMP is not None and OVERRIDE_MW_PI_NS is not None:
-    raise ValueError("Set only one of OVERRIDE_MW_PI_FTSAMP or OVERRIDE_MW_PI_NS.")
-
-if OVERRIDE_MW_PI_FTSAMP is not None:
-    config.mw_pi_ftsamp = int(OVERRIDE_MW_PI_FTSAMP)
-    pi_source = f"OVERRIDE_MW_PI_FTSAMP={config.mw_pi_ftsamp}"
-elif OVERRIDE_MW_PI_NS is not None:
-    config.mw_pi_ftns = float(OVERRIDE_MW_PI_NS)
-    pi_source = f"OVERRIDE_MW_PI_NS={OVERRIDE_MW_PI_NS} ns"
-else:
-    if t.get("mw_pi_ftsamp") is None:
-        raise ValueError(
-            "No calibration pi pulse found for this transition. "
-            "Set OVERRIDE_MW_PI_FTSAMP (or OVERRIDE_MW_PI_NS)."
-        )
-    config.mw_pi_ftsamp = int(t["mw_pi_ftsamp"])
-    pi_source = f"calibration.{active_transition}.mw_pi_ftsamp={config.mw_pi_ftsamp}"
-
-config.reps = REPS
-config.get_reference = GET_REFERENCE
-
-config.add_linear_sweep("mw", "fMHz", start=ODMR_START_MHZ, stop=ODMR_STOP_MHZ, delta=ODMR_DELTA_MHZ)
+config, active_transition, pi_source = _build_podmr_config(cfg, REPS)
 
 print(
     f"[podmr] Sweep: {ODMR_START_MHZ:.3f} -> {ODMR_STOP_MHZ:.3f} MHz "
@@ -100,12 +116,46 @@ print(
 print(f"[podmr] Active transition: {active_transition} | mw_fMHz={config.mw_fMHz} MHz | mw_gain={config.mw_gain}")
 print(f"[podmr] pi pulse: {pi_source}")
 
+
+def _build_chunk_config_context(reps: int):
+    chunk_cfg, chunk_transition, chunk_pi_source = _build_podmr_config(cfg, reps)
+    return (
+        chunk_cfg,
+        {
+            "transition": chunk_transition,
+            "pi_source": chunk_pi_source,
+            "odmr_start_mhz": float(ODMR_START_MHZ),
+            "odmr_stop_mhz": float(ODMR_STOP_MHZ),
+            "odmr_delta_mhz": float(ODMR_DELTA_MHZ),
+        },
+    )
+
+
+if maybe_run_chunked_mode(
+    run_mode=RUN_MODE,
+    program_class=PODMRFineRes,
+    cfg_dict=cfg,
+    build_config_for_chunk=_build_chunk_config_context,
+    output_dir=OUTPUT_DIR,
+    experiment_name="podmr_fine_res",
+    target_total_reps=int(TARGET_TOTAL_REPS),
+    chunk_reps=int(CHUNK_REPS),
+    acquire_progress=bool(ACQUIRE_PROGRESS),
+    piezo_initial_position_um=PIEZO_INITIAL_POSITION_UM,
+    combine_filename="podmr_fine_res_combined.h5",
+    combine_fn=combine_chunk_hdf5_files,
+):
+    raise SystemExit(0)
+
+if RUN_MODE != "single":
+    raise ValueError("RUN_MODE must be 'single' or 'chunked'.")
+
 # =============================================================================
 # Acquire
 # =============================================================================
 
 prog = PODMRFineRes(config)
-data = prog.acquire(progress=True)
+data = prog.acquire(progress=bool(ACQUIRE_PROGRESS))
 
 # =============================================================================
 # Save to HDF5
@@ -221,16 +271,21 @@ if contrast is not None:
             fit_summary_text = f"Argmin fallback dip center={dip_center_mhz:.3f} MHz"
             print(f"[podmr] Dip center (argmin fallback): {dip_center_mhz:.6f} MHz")
 
-metadata = {
-    "run_id": run_id,
-    "mw_MHz": f"{config.mw_fMHz:.3f}",
-    "gain": config.mw_gain,
-    "pi_ftsamp": config.mw_pi_ftsamp,
-    "mw_gain": config.mw_gain,
-    "reps": config.reps,
-    "laser_mW": cfg["optics"]["excitation_laser_power_mW"],
-    "units": "cts/s" if PLOT_USE_COUNTS_S else "raw",
-}
+metadata = build_plot_metadata(
+    program_class=PODMRFineRes,
+    config_obj=config,
+    base_metadata={
+        "run_id": run_id,
+        "mw_MHz": f"{config.mw_fMHz:.3f}",
+        "gain": config.mw_gain,
+        "pi_ftsamp": config.mw_pi_ftsamp,
+        "mw_gain": config.mw_gain,
+        "sequence": "laser - pi - readout",
+        "reps": config.reps,
+        "laser_mW": cfg["optics"]["excitation_laser_power_mW"],
+        "units": "cts/s" if PLOT_USE_COUNTS_S else "raw",
+    },
+)
 
 if PLOT_DEBUG_RAW:
     plot_debug_traces(
@@ -238,7 +293,11 @@ if PLOT_DEBUG_RAW:
         traces,
         x_label="MW Frequency (MHz)",
         y_label="Counts/s" if PLOT_USE_COUNTS_S else "Counts",
-        title=f"PODMR Debug Raw | {timestamp}",
+        title=build_standard_title(
+            experiment_label="PODMR Debug Raw",
+            sequence_label="laser - pi - readout",
+            run_id=run_id,
+        ),
         metadata=metadata,
         metadata_position=PLOT_METADATA_POSITION,
     )
@@ -247,7 +306,11 @@ fig, ax_left, _, _ = plot_contrast_twin(
     x_mhz,
     traces,
     x_label="MW Frequency (MHz)",
-    title=f"PODMR | {timestamp}",
+    title=build_standard_title(
+        experiment_label="PODMR",
+        sequence_label="laser - pi - readout",
+        run_id=run_id,
+    ),
     metadata=metadata,
     metadata_position=PLOT_METADATA_POSITION,
     fit_x=fit_x,
