@@ -67,13 +67,10 @@ class CountingDurationFineRes(NVAveragerProgram, ReadoutHelpers):
         self.mw_pulse_waveform_len_treg = max(int(np.ceil(self.cfg.mw_pi_ftsamp / self.samps_per_clk)), 3)
         self.mw_pulse_waveform_len_ftsamp = self.mw_pulse_waveform_len_treg * self.samps_per_clk
         # Create waveform with exact duration
-        i_data = np.zeros(self.mw_pulse_waveform_len_ftsamp)
-        q_data = np.zeros(self.mw_pulse_waveform_len_ftsamp)
-        i_data[:self.cfg.mw_pi_ftsamp] = 1
-        q_data[:self.cfg.mw_pi_ftsamp] = 1
-        i_data *= self.soccfg.get_maxv(self.cfg.mw_channel)
-        q_data *= self.soccfg.get_maxv(self.cfg.mw_channel)
-        self.add_envelope(ch=self.cfg.mw_channel, name="pulse", idata=i_data, qdata=q_data)
+        data = np.zeros(self.mw_pulse_waveform_len_ftsamp)
+        data[:self.cfg.mw_pi_ftsamp] = 1
+        data *= self.soccfg.get_maxv(self.cfg.mw_channel)
+        self.add_envelope(ch=self.cfg.mw_channel, name="pulse", idata=data, qdata=None)
         # MW pulse register
         self.default_pulse_registers(ch=self.cfg.mw_channel,
                                      style='arb',
@@ -87,17 +84,14 @@ class CountingDurationFineRes(NVAveragerProgram, ReadoutHelpers):
         self.pre_init()
 
     def body(self):
-        self.laser_init()
+        self.initialize_spin()
         self.program_pulse()
-        self.signal_and_reference_readout(self.program_pulse)
+        self.readout_and_reference(self.program_pulse)
 
     def program_pulse(self):
         """Program the MW pulse sequence"""
         self.pulse(ch=self.cfg.mw_channel)
         self.sync_all()
-
-    # TODO: See to cleaning up acquire later
-
     
     def acquire(self, raw_data=False, *arg, **kwarg):
 

@@ -1,8 +1,8 @@
 '''
-Helper class for shared laser initialization and readout sequences
+Helper class for shared spin initialization and readout sequences
 =======================================================================
-Provides common laser_init(), NV readout, and acquisition/analysis methods
-for NV test suite programs.
+Provides common spin initialization and readout methods, and acquisition/analysis methods
+for Fine Timing Suite programs.
 '''
 
 import numpy as np
@@ -13,24 +13,13 @@ from qickdawg.util.apply_on_axis_0_n_times import apply_on_axis_0_n_times
 class ReadoutHelpers:
     """
     Mixin class that provides shared laser initialization, readout, and data analysis methods
-    for NV pulse programs. Intended to be used with NVAveragerProgram subclasses.
+    for Fine Resolution programs. Intended to be used with NVAveragerProgram subclasses.
     """
-    
-    # def check_laser_init_timing(self):
-    #     """Validate that laser initialization duration is sufficient"""
-    #     laser_init_duration = self.cfg.laser_init_treg - (self.cfg.laser_readout_offset_treg + self.cfg.readout_integration_treg)
-    #     if laser_init_duration <= 3:
-    #         raise ValueError(f"laser_init_treg ({self.cfg.laser_init_treg}) must be long enough so that "
-    #                        f"laser_init_treg - (laser_readout_offset_treg + readout_integration_treg) > 3. "
-    #                        f"Current calculated duration: {laser_init_duration}")
     
     def setup_helper_registers(self, mw_channel):
         """Setup registers and validation for readout sequence"""
-        # self.check_laser_init_timing()
         self.mw_gain_register = self.get_gen_reg(mw_channel, "gain")
-        # self.mw_frequency_register = self.get_gen_reg(mw_channel, "fMHz")
 
-        # Error if trigger would overflow
         if self.cfg.laser_on_treg < self.cfg.readout_reference_start_treg + self.cfg.readout_integration_treg:
             raise ValueError(
                 "Invalid readout timing: laser_on_treg must be >= "
@@ -42,7 +31,10 @@ class ReadoutHelpers:
 
 
     def pre_init(self):
-        """Pre-initialization pulse to bring system close to initialized state"""
+        """
+        Optional pre-initialization pulse. Performs the spin initialization 
+        for the first cycle.
+        """
         if self.cfg.pre_init:
             self.trigger(
                 pins=[self.cfg.laser_gate_pmod],
@@ -53,53 +45,49 @@ class ReadoutHelpers:
         self.wait_all()
         self.sync_all(self.cfg.relax_delay_treg)
 
-    def laser_init(self):
-        """Initialize spin state with laser pulse"""
+
+    def initialize_spin(self):
+        """
+        Initialize the spin state. This function ensures that initialization completes
+        in alignment with the start of the MW pulses.
+
+        Optionally, laser initialization and relaxation can be moved here instead of
+        occurring during the previous cycle's readout.
+        """
         self.sync_all(self.cfg.mw_to_laser_delay_treg)
 
 
     def nv_readout(self):
-        """Readout spin state with laser and ADC."""
-        # RO
-        # self.trigger_no_off(  # Laser
-        #     pins=[self.cfg.laser_gate_pmod],
-        #     t=0)
-        # self.trigger(  # Laser + ADC
-        #     adcs=self.cfg.adcs,
-        #     pins=[self.cfg.laser_gate_pmod],
-        #     adc_trig_offset=0,
-        #     width=self.cfg.readout_integration_treg,
-        #     t=self.cfg.laser_readout_offset_treg)
-        # self.wait_all(self.cfg.readout_integration_treg)
-        # self.sync_all(self.cfg.readout_integration_treg + self.cfg.pulse_seq_delay_treg)
+        """
+        Read out the spin state using the laser and ADC. Currently delegates to ttl_readout(),
+        which performs the signal and reference readouts and applies the post-laser
+        relaxation delay.
+        """
         self.ttl_readout()
 
-    def signal_and_reference_readout(self, program_pulse_fn):
+    def readout_and_reference(self, pulse_program_fn):
         """
-        Perform signal readout (with RF pulse), then optionally reference readout (without RF).
-        
-        The signal readout is performed immediately (pulse was already applied in body).
-        If cfg.get_reference is True, reinitializes and takes a reference readout with MW gain set to 0.
-        
+        Perform the main readout, then if cfg.get_reference is True, acquires a timing-matched
+        reference readout without the RF pulses.
+
         Parameters
         ----------
-        program_pulse_fn : callable
+        pulse_program_fn : callable
             Function to call to program the pulse sequence for the reference measurement.
             This is typically self.program_pulses() or equivalent.
         """
-        # Signal readout (pulse was already applied in body)
+        # Core readout
         self.nv_readout()
         
         # Reference readout (if configured)
         if self.cfg.get_reference:
-            # Set MW gain to 0 for reference
+            # Set MW gain to 0
             self.mw_gain_register.set_to(0, physical_unit=False)
             self.laser_init()
-            program_pulse_fn()
+            pulse_program_fn()
             self.nv_readout()
             # Restore original gain
             self.mw_gain_register.set_to(self.cfg.mw_gain, physical_unit=False)
-
 
 
     def acquire(self, raw_data=False, sweep_param=None, *arg, **kwarg):

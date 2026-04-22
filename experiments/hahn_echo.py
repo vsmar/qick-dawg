@@ -13,7 +13,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 
-from qickdawg.nvtestsuite.hahn_echo_fine_res import HahnEchoFineRes
+from qickdawg.finetimingsuite.hahn_echo_fine_res import HahnEchoFineRes
 
 from config import (
     load_config,

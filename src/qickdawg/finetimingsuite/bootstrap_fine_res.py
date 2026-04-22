@@ -24,7 +24,7 @@ class BootstrapFineRes(NVAveragerProgram, ReadoutHelpers):
 
         # MW pulse parameters
         "mw_freg", # Microwave freq 
-        "mw_nqz", # 1 at 1405 MHz
+        "mw_nqz", # 1 at <2.457 GHz
         "mw_gain", # MW Gain
 
         # Bootstrap specific parameters
@@ -131,9 +131,9 @@ class BootstrapFineRes(NVAveragerProgram, ReadoutHelpers):
         self.pre_init()
 
     def body(self):
-        self.laser_init()
+        self.initialize_spin()
         self.program_pulse()
-        self.signal_and_reference_readout(self.program_pulse)
+        self.readout_and_reference(self.program_pulse)
 
     def program_pulse(self):
         self.set_pulse_registers(ch=self.cfg.mw_channel, waveform="pulse_seq")

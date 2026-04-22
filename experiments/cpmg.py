@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
-from qickdawg.nvtestsuite.cpmg_xy_subnano_fine_res import CPMGXYFineRes
+from qickdawg.finetimingsuite.cpmg_xy_fine_res import CPMGXYFineRes
 
 from config import (
     load_config,

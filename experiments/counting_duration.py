@@ -16,7 +16,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from tqdm.auto import tqdm
 
-from qickdawg.nvtestsuite.counting_duration_fine_res import CountingDurationFineRes
+from qickdawg.finetimingsuite.counting_duration_fine_res import CountingDurationFineRes
 
 from config import (
     load_config,

@@ -14,7 +14,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 
-from qickdawg.nvtestsuite.t1_fine_res import T1FineRes
+from qickdawg.finetimingsuite.t1_fine_res import T1FineRes
 
 from config import (
     load_config,

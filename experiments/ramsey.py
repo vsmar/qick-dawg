@@ -13,7 +13,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 
-from qickdawg.nvtestsuite.ramsey_fine_res import RamseyFineRes
+from qickdawg.finetimingsuite.ramsey_fine_res import RamseyFineRes
 
 from config import (
     load_config,

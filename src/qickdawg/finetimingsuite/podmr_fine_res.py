@@ -63,27 +63,24 @@ class PODMRFineRes(ReadoutHelpers, NVAveragerProgram):
         # Setup laser
         self.setup_readout()
         
-        # Get samps per clk for later calculations
         self.samps_per_clk = self.soccfg['gens'][self.cfg.mw_channel]['samps_per_clk']
-        # Configure the waveforms for fine resolution pulse steps (must be >= 3 treg units)
+        
+        # Configure pi pulse waveform
         self.mw_pulse_waveform_len_treg = max(int(np.ceil(self.cfg.mw_pi_ftsamp / self.samps_per_clk)), 3)
         self.mw_pulse_waveform_len_ftsamp = self.mw_pulse_waveform_len_treg * self.samps_per_clk
-        # Create waveform with exact duration
-        i_data = np.zeros(self.mw_pulse_waveform_len_ftsamp)
-        q_data = np.zeros(self.mw_pulse_waveform_len_ftsamp)
-        i_data[:self.cfg.mw_pi_ftsamp] = 1
-        q_data[:self.cfg.mw_pi_ftsamp] = 1
-        i_data *= self.soccfg.get_maxv(self.cfg.mw_channel)
-        q_data *= self.soccfg.get_maxv(self.cfg.mw_channel)
-        self.add_envelope(ch=self.cfg.mw_channel, name="pulse", idata=i_data, qdata=q_data)
-        # MW pulse register
+
+        data = np.zeros(self.mw_pulse_waveform_len_ftsamp)
+        data[:self.cfg.mw_pi_ftsamp] = 1
+        data *= self.soccfg.get_maxv(self.cfg.mw_channel)
+        self.add_envelope(ch=self.cfg.mw_channel, name="pulse", idata=data, qdata=data)
+
+        # Configure pulse registers
         self.default_pulse_registers(ch=self.cfg.mw_channel,
                                      style='arb',
                                      freq=self.cfg.mw_start_freg,
                                      gain=self.cfg.mw_gain,
                                      waveform="pulse",
                                      phase=0)
-        # Explicitly arm the pulse
         self.set_pulse_registers(ch=self.cfg.mw_channel)
         
         # Setup frequency sweep
@@ -94,19 +91,21 @@ class PODMRFineRes(ReadoutHelpers, NVAveragerProgram):
                                 self.cfg.mw_end_fMHz,
                                 self.cfg.nsweep_points))
         
-        # start from a close to initialized state
         self.pre_init()
 
     def body(self):
-        self.laser_init()
+        self.initialize_spin()
         self.program_pulse()
-        self.signal_and_reference_readout(self.program_pulse)
+        self.readout_and_reference(self.program_pulse)
 
     def program_pulse(self):
         self.pulse(ch=self.cfg.mw_channel)
         self.sync_all()
     
     def acquire(self, raw_data=False, *arg, **kwarg):
-        # self.acquire --> ReadoutHelpers.acquire --> NVAveragerProgram.acquire
+        """
+        Delegates to ReadoutHelpers.acquire() → NVAveragerProgram.acquire(), 
+        tagging the sweep axis as 'mw_fMHz'.
+        """
         data = super().acquire(raw_data=raw_data, sweep_param='mw_fMHz', *arg, **kwarg)
         return data
