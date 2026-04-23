@@ -6,6 +6,8 @@ Author: Victor Marcenac
 Implements a Carr-Purcell-Meiboom-Gill (CPMG) sequence with XY8 phase
 cycling for coherence measurements & Nuclear spectroscopy of NV center spins.
 
+NOTE: The interpulse delay (τ/2τ) is measured from the end of one pulse to the start of the next
+
 Sequence structure:
     π/2_Y  →  [ τ → π_φ → τ ] × N_CPMG  →  π/2_±Y
 
@@ -231,40 +233,44 @@ class CPMGXYFineRes(ReadoutHelpers, NVAveragerProgram):
         """
         # ---------------------
         # Initial π/2 rotation
-        # ---------------------
-        self.set_pulse_registers(ch=self.cfg.mw_channel, waveform="half_pi_0", phase=self.deg2reg(90))
+        # --------------------- 
+        self.set_pulse_registers(ch=self.cfg.mw_channel, waveform="half_pi_0")
+        self.phase_reg.set_to(90, physical_unit=True)
         self.sync_all()
 
         self.pulse(ch=self.cfg.mw_channel)
         self.sync_all()
 
-        # ---------------------
-        # CPMG loop init.
-        # ---------------------
-        self.n_cpmg_register.reset()
+        # Skip programming loop if n_cpmg = 0 --
+        # Delays are accounted for in set_waveform and initial value of delay_fine_samples
+        if self.cfg.n_cpmg > 0:
+            # ---------------------
+            # CPMG loop init.
+            # ---------------------
+            self.n_cpmg_register.reset()
 
-        # Subtract τ from delay_fine_samples so the first inter-pulse delay is τ (not 2τ).
-        self.math(self.delay_fine_samples.page, self.delay_fine_samples.addr, 
-                      self.delay_fine_samples.addr, "-", self.tau.addr)
+            # Subtract τ from delay_fine_samples so the first inter-pulse delay is τ (not 2τ).
+            self.math(self.delay_fine_samples.page, self.delay_fine_samples.addr, 
+                        self.delay_fine_samples.addr, "-", self.tau.addr)
 
-        # Select π waveform template (used only to set modecode → pulse length)  
-        # Phase and fine timing are handled dynamically in set_waveform()
-        self.set_pulse_registers(ch=self.cfg.mw_channel, waveform="pi_0")
+            # Select π waveform template (used only to set modecode → pulse length)  
+            # Phase and fine timing are handled dynamically in set_waveform()
+            self.set_pulse_registers(ch=self.cfg.mw_channel, waveform="pi_0")
 
-        # ---------------------
-        # CPMG π-pulse loop
-        # ---------------------
-        self.label(f"LOOP_ncpmg_{label_id}") # Begin loop
+            # ---------------------
+            # CPMG π-pulse loop
+            # ---------------------
+            self.label(f"LOOP_ncpmg_{label_id}") # Begin loop
 
-        self.set_waveform(pi_pulse=True) # Compute delay, select offset & phase
-        self.pulse(ch=self.cfg.mw_channel)
-        self.sync_all()
+            self.set_waveform(pi_pulse=True) # Compute delay, select offset & phase
+            self.pulse(ch=self.cfg.mw_channel)
+            self.sync_all()
 
-        self.loopnz(
-            self.n_cpmg_register.page, 
-            self.n_cpmg_register.addr, 
-            f"LOOP_ncpmg_{label_id}"
-        )
+            self.loopnz(
+                self.n_cpmg_register.page, 
+                self.n_cpmg_register.addr, 
+                f"LOOP_ncpmg_{label_id}"
+            )
 
         # ---------------------
         # Final π/2 projection

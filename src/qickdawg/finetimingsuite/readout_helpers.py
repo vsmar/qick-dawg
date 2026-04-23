@@ -83,7 +83,7 @@ class ReadoutHelpers:
         if self.cfg.get_reference:
             # Set MW gain to 0
             self.mw_gain_register.set_to(0, physical_unit=False)
-            self.laser_init()
+            self.initialize_spin()
             pulse_program_fn()
             self.nv_readout()
             # Restore original gain
