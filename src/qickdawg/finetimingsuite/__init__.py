@@ -10,7 +10,6 @@ from .cpmg_xy_fine_res import CPMGXYFineRes
 from .t1_fine_res import T1FineRes
 
 from .counting_duration_fine_res import CountingDurationFineRes
-from .bootstrap_fine_res import BootstrapFineRes
 
 from .readout_helpers import ReadoutHelpers
 from .visualization import * # FIXME

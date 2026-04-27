@@ -26,7 +26,7 @@ class Visualizer:
     CONTRAST_MODES = {
         "signal_over_ss": "Signal / Steady State",
         "signal_over_off": "Signal / MW Off",
-        "signal_minus_off": "Signal - MW Off (Cts/s)",
+        "signal_minus_off": "(Signal - MW Off) / MW Off",
     }
 
     DATA_TRACES = {
@@ -185,10 +185,68 @@ class Visualizer:
         elif mode == "signal_minus_off":
             if "MW Off - Signal" not in traces:
                 raise ValueError("Contrast mode 'Signal - MW Off' requires 'MW Off - Signal' trace.")
-            return signal - traces["MW Off - Signal"]
+            return (signal - traces["MW Off - Signal"]) / traces["MW Off - Signal"]
 
         else:
             raise ValueError(f"Unknown contrast mode: {mode}")
+        
+
+    @staticmethod
+    def plot_podmr(data, cfg=None, fit=True, contrast_mode="signal_over_off", view="raw"):
+        """Plot PODMR (pulsed ODMR) data with optional Laplace dip fit.
+        
+        Parameters
+        ----------
+            data : object
+                Data object containing signal1/signal1_cts_s, signal2/signal2_cts_s, and mw_fMHz.
+            cfg : object, optional
+                Configuration object with attributes like mw_freq, mw_gain, etc.
+            fit : bool, default True
+                Whether to fit a Laplace dip model to the ratio.
+            contrast_mode : str, default "signal_over_off"
+                Method for computing contrast if view="contrast". 
+                Options: "signal_over_ss": "Signal / Steady State", "signal_over_off": "Signal / MW Off", "signal_minus_off": "Signal - MW Off".
+            view : str, default "raw"
+                Plotting view mode passed to plot_experiment.
+        """
+        def lorentzian_dip_model(x, depth, mu, b, C):
+            return C - depth / (1 + ((x - mu) / b) ** 2)
+        # TODO: Add a triplet dip model fow when there is observable hyperfine splitting
+
+        def initial_guess(x, y):
+            span = float(np.max(x) - np.min(x))
+            y_min = float(np.min(y))
+            C0 = float(np.median(y))
+            depth0 = max(C0 - y_min, 1e-4)
+            b0 = max(span / 20.0, 1e-6)
+            return [depth0, np.mean(x), b0, C0]
+
+        def format_params(p):
+            depth, mu, b, C = p
+            return [
+                f"d = {depth:.4f}",
+                f"$\\mu$ = {mu:.3f} MHz",
+                f"b (HWHM) = {b:.3f} MHz",
+                f"C = {C:.3f}",
+            ]
+
+        PODMR_SPEC = {
+            "name": "PODMR",
+            "x_key": "mw_fMHz",
+            "x_label": "Frequency (MHz)",
+            "contrast_mode": contrast_mode,
+            "traces": Visualizer.DATA_TRACES,
+            "fit": {
+                "model": lorentzian_dip_model,
+                "trace": "MW On - Signal",
+                "initial_guess": initial_guess,
+                "format_params": format_params,
+                "label": "Lorentzian Dip",
+                "equation": r"$y = C - \frac{d}{1 + ((x-\mu)/b)^2}$",
+            }
+        }
+
+        Visualizer.plot_experiment(data, PODMR_SPEC, cfg=cfg, fit=fit, view=view)
 
 
     @staticmethod
@@ -255,65 +313,6 @@ class Visualizer:
 
 
     @staticmethod
-    def plot_podmr(data, cfg=None, fit=True, contrast_mode="signal_over_off", view="raw"):
-        """Plot PODMR (pulsed ODMR) data with optional Laplace dip fit.
-        
-        Parameters
-        ----------
-            data : object
-                Data object containing signal1/signal1_cts_s, signal2/signal2_cts_s, and mw_fMHz.
-            cfg : object, optional
-                Configuration object with attributes like mw_freq, mw_gain, etc.
-            fit : bool, default True
-                Whether to fit a Laplace dip model to the ratio.
-            contrast_mode : str, default "signal_over_off"
-                Method for computing contrast if view="contrast". 
-                Options: "signal_over_ss": "Signal / Steady State", "signal_over_off": "Signal / MW Off", "signal_minus_off": "Signal - MW Off".
-            view : str, default "raw"
-                Plotting view mode passed to plot_experiment.
-        """
-        def lorentzian_dip_model(x, depth, mu, b, C):
-            return C - depth / (1 + ((x - mu) / b) ** 2)
-        # TODO: Add a triplet dip model fow when there is observable hyperfine splitting
-
-        def initial_guess(x, y):
-            span = float(np.max(x) - np.min(x))
-            y_min = float(np.min(y))
-            C0 = float(np.median(y))
-            depth0 = max(C0 - y_min, 1e-4)
-            b0 = max(span / 20.0, 1e-6)
-            return [depth0, np.mean(x), b0, C0]
-
-        def format_params(p):
-            depth, mu, b, C = p
-            return [
-                f"d = {depth:.4f}",
-                f"$\\mu$ = {mu:.3f} MHz",
-                f"b (HWHM) = {b:.3f} MHz",
-                f"C = {C:.3f}",
-            ]
-
-        PODMR_SPEC = {
-            "name": "PODMR",
-            "x_key": "mw_fMHz",
-            "x_label": "Frequency (MHz)",
-            "contrast_mode": contrast_mode,
-            "traces": Visualizer.DATA_TRACES,
-            "fit": {
-                "model": lorentzian_dip_model,
-                "trace": "MW On - Signal",
-                "initial_guess": initial_guess,
-                "format_params": format_params,
-                "label": "Lorentzian Dip",
-                "equation": r"$y = C - \frac{d}{1 + ((x-\mu)/b)^2}$",
-            }
-        }
-
-        Visualizer.plot_experiment(data, PODMR_SPEC, cfg=cfg, fit=fit, view=view)
-
-
-
-    @staticmethod
     def plot_cpmg(data, cfg=None, contrast_mode="signal_over_ss", view="raw"):
         CPMG_SPEC = {
             "name": "CPMG-XY",
@@ -327,7 +326,7 @@ class Visualizer:
 
 
     @staticmethod
-    def plot_hahnecho(data, cfg=None, contrast_mode="signal_over_ss", fit=True, view="raw"):
+    def plot_hahnecho(data, cfg=None, contrast_mode="signal_over_off", fit=True, view="raw"):
         # NOTE: This is configured for a pi/2 Y - tau - pi X - tau - pi/2 -Y Hahn Echo sequence.
         def dephasing_model(x, A, t2star, C):
             return A * np.exp(-x / t2star) + C
@@ -345,14 +344,14 @@ class Visualizer:
             A, t2star, C = p
             return [
                 f"A = {A:.4f}",
-                f"$T_2^*$ = {t2star/1e3:.3f} $\\mu$s",
+                f"$T_2^*$ = {t2star:.3f} $\\mu$s",
                 f"C = {C:.3f}",
             ]
 
         HAHNECHO_SPEC = {
             "name": "Hahn Echo",
-            "x_key": "tau_ftns",
-            "x_label": rf"$\tau$ (ns)",
+            "x_key": "tau_ftus",
+            "x_label": f"$\\tau$ ($\\mu$s)",
             "contrast_mode": contrast_mode,
             "traces": Visualizer.DATA_TRACES,
             "fit": {
@@ -368,7 +367,7 @@ class Visualizer:
         Visualizer.plot_experiment(data, HAHNECHO_SPEC, cfg=cfg, fit=fit, view=view)
 
     @staticmethod
-    def plot_ramsey(data, cfg=None, contrast_mode="signal_over_ss", fit=True, view="raw", fit_mode="oscillatory"):
+    def plot_ramsey(data, cfg=None, contrast_mode="signal_over_off", fit=True, view="raw", fit_mode="oscillatory"):
         # NOTE: This is configured for a pi/2 Y - tau - pi/2 -Y Ramsey sequence.
         def ramsey_model(x, A, f, t2star, C):
             return A * np.exp(-x / t2star) * np.cos(2 * np.pi * f * x) + C

@@ -166,7 +166,28 @@ class CPMGXYFineRes(ReadoutHelpers, NVAveragerProgram):
         
         #  τ sweep register (in ftsamp units)
         self.tau = self.new_gen_reg(self.cfg.mw_channel, "tau", init_val=self.cfg.tau_start_ftsamp)
-        self.add_sweep(NVQickSweep(self, self.tau, self.cfg.tau_start_ftsamp, self.cfg.tau_end_ftsamp, self.cfg.nsweep_points))
+        if self.cfg.scaling_mode == 'exponential':
+            self.add_sweep(NVQickSweep(
+                self,
+                self.tau,
+                self.cfg.tau_start_ftsamp,
+                self.cfg.tau_end_ftsamp,
+                expts=self.cfg.nsweep_points,
+                scaling_mode=self.cfg.scaling_mode,
+                scaling_factor=self.cfg.scaling_factor)
+                )
+        elif self.cfg.scaling_mode == 'linear':
+            self.add_sweep(NVQickSweep(
+                self,
+                self.tau,
+                self.cfg.tau_start_ftsamp,
+                self.cfg.tau_end_ftsamp,
+                self.cfg.nsweep_points)
+                )
+        else:
+            assert 0, 'cfg.scaling_mode must be "linear" or "exponential"'
+
+        # self.add_sweep(NVQickSweep(self, self.tau, self.cfg.tau_start_ftsamp, self.cfg.tau_end_ftsamp, self.cfg.nsweep_points))
         
         # Direct handles to the waveform address and NCO phase registers
         self.address_reg = self.get_gen_reg(self.cfg.mw_channel, name='addr')

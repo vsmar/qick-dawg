@@ -32,8 +32,8 @@ class T1FineRes(ReadoutHelpers, NVAveragerProgram):
         "mw_gain",
 
         # Sweep parameters
-        "t1_delay_start_treg",
-        "t1_delay_end_treg",
+        "delay_start_treg",
+        "delay_end_treg",
         "scaling_mode",
         "nsweep_points",          # Only used if scaling_mode is 'linear'
         "scaling_factor",         # Only used if scaling_mode is 'exponential'
@@ -92,23 +92,23 @@ class T1FineRes(ReadoutHelpers, NVAveragerProgram):
         self.set_pulse_registers(ch=self.cfg.mw_channel)
         
         # Setup T1-delay sweep (time-register units).
-        self.t1_delay_register = self.new_gen_reg(self.cfg.mw_channel, "t1_delay")
+        self.delay_register = self.new_gen_reg(self.cfg.mw_channel, "delay")
 
         if self.cfg.scaling_mode == 'exponential':
             self.add_sweep(NVQickSweep(
                 self,
-                self.t1_delay_register,
-                self.cfg.t1_delay_start_treg,
-                self.cfg.t1_delay_end_treg,
+                self.delay_register,
+                self.cfg.delay_start_treg,
+                self.cfg.delay_end_treg,
                 expts=self.cfg.nsweep_points,
                 scaling_mode=self.cfg.scaling_mode,
                 scaling_factor=self.cfg.scaling_factor))
         elif self.cfg.scaling_mode == 'linear':
             self.add_sweep(NVQickSweep(
                 self,
-                self.t1_delay_register,
-                self.cfg.t1_delay_start_treg,
-                self.cfg.t1_delay_end_treg,
+                self.delay_register,
+                self.cfg.delay_start_treg,
+                self.cfg.delay_end_treg,
                 self.cfg.nsweep_points))
         else:
             assert 0, 'cfg.scaling_mode must be "linear" or "exponential"'
@@ -122,10 +122,10 @@ class T1FineRes(ReadoutHelpers, NVAveragerProgram):
 
     def program_pulse(self):
         self.pulse(ch=self.cfg.mw_channel)
-        self.sync(self.t1_delay_register.page, self.t1_delay_register.addr)
+        self.sync(self.delay_register.page, self.delay_register.addr)
         self.sync_all()
     
     def acquire(self, raw_data=False, *arg, **kwarg):
         # self.acquire --> ReadoutHelpers.acquire --> NVAveragerProgram.acquire
-        data = super().acquire(raw_data=raw_data, sweep_param='t1_delay_treg', *arg, **kwarg)
+        data = super().acquire(raw_data=raw_data, sweep_param='delay_treg', *arg, **kwarg)
         return data
