@@ -11,7 +11,7 @@ from ..util import apply_on_axis_0_n_times
 class IntegratedReadoutWindow(NVAveragerProgram):
     '''
     An NVAveragerProgram class that generates and executes a sequence used
-    to determine the pi (pi/2) pulse lenghts for your experimetanl configuration
+    to determine the pi (pi/2) pulse lenghts for your experimental configuration
 
     Parameters
     -------------------------------------------------------------------
