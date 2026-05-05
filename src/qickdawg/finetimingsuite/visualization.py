@@ -37,7 +37,7 @@ class Visualizer:
     }
 
     @staticmethod
-    def plot_experiment(data, spec, cfg=None, fit=True, view="raw"):
+    def plot_experiment(data, spec, cfg=None, fit=True, view="raw", show=True):
         # ---------------------------
         # 1. X axis
         # ---------------------------
@@ -160,9 +160,12 @@ class Visualizer:
                 bbox=Visualizer.TEXT_BBOX_STYLE # dict(boxstyle="round", alpha=0.6)
             )
 
+        fig = plt.gcf()
         plt.legend(loc="lower right")
         plt.tight_layout()
-        plt.show()
+        if show:
+            plt.show()
+        return fig
 
 
     @staticmethod
@@ -192,7 +195,7 @@ class Visualizer:
         
 
     @staticmethod
-    def plot_podmr(data, cfg=None, fit=True, contrast_mode="signal_over_off", view="raw"):
+    def plot_podmr(data, cfg=None, fit=True, contrast_mode="signal_over_off", view="raw", show=True):
         """Plot PODMR (pulsed ODMR) data with optional Laplace dip fit.
         
         Parameters
@@ -246,11 +249,11 @@ class Visualizer:
             }
         }
 
-        Visualizer.plot_experiment(data, PODMR_SPEC, cfg=cfg, fit=fit, view=view)
+        return Visualizer.plot_experiment(data, PODMR_SPEC, cfg=cfg, fit=fit, view=view, show=show)
 
 
     @staticmethod
-    def plot_rabi(data, cfg=None, fit=True, contrast_mode="signal_over_off", view="raw"):
+    def plot_rabi(data, cfg=None, fit=True, contrast_mode="signal_over_off", view="raw", show=True):
         """Plot Rabi oscillation data with optional fit and contrast views.
         
         Parameters
@@ -309,11 +312,11 @@ class Visualizer:
             }
         }
 
-        Visualizer.plot_experiment(data, RABI_SPEC, cfg=cfg, fit=fit, view=view)
+        return Visualizer.plot_experiment(data, RABI_SPEC, cfg=cfg, fit=fit, view=view, show=show)
 
 
     @staticmethod
-    def plot_cpmg(data, cfg=None, contrast_mode="signal_over_ss", view="raw"):
+    def plot_cpmg(data, cfg=None, contrast_mode="signal_over_ss", view="raw", show=True):
         CPMG_SPEC = {
             "name": "CPMG-XY",
             "x_key": "tau_ftns",
@@ -322,11 +325,11 @@ class Visualizer:
             "traces": Visualizer.DATA_TRACES,
         }
 
-        Visualizer.plot_experiment(data, CPMG_SPEC, cfg=cfg, fit=False, view=view)
+        return Visualizer.plot_experiment(data, CPMG_SPEC, cfg=cfg, fit=False, view=view, show=show)
 
 
     @staticmethod
-    def plot_hahnecho(data, cfg=None, contrast_mode="signal_over_off", fit=True, view="raw"):
+    def plot_hahnecho(data, cfg=None, contrast_mode="signal_over_off", fit=True, view="raw", show=True):
         # NOTE: This is configured for a pi/2 Y - tau - pi X - tau - pi/2 -Y Hahn Echo sequence.
         def dephasing_model(x, A, t2star, C):
             return A * np.exp(-x / t2star) + C
@@ -364,10 +367,10 @@ class Visualizer:
             }
         }
 
-        Visualizer.plot_experiment(data, HAHNECHO_SPEC, cfg=cfg, fit=fit, view=view)
+        return Visualizer.plot_experiment(data, HAHNECHO_SPEC, cfg=cfg, fit=fit, view=view, show=show)
 
     @staticmethod
-    def plot_ramsey(data, cfg=None, contrast_mode="signal_over_off", fit=True, view="raw", fit_mode="oscillatory"):
+    def plot_ramsey(data, cfg=None, contrast_mode="signal_over_off", fit=True, view="raw", fit_mode="oscillatory", show=True):
         # NOTE: This is configured for a pi/2 Y - tau - pi/2 -Y Ramsey sequence.
         def ramsey_model(x, A, f, t2star, C):
             return A * np.exp(-x / t2star) * np.cos(2 * np.pi * f * x) + C
@@ -438,11 +441,11 @@ class Visualizer:
             "fit": fit_cfg,
         }
 
-        Visualizer.plot_experiment(data, RAMSEY_SPEC, cfg=cfg, fit=fit, view=view)
+        return Visualizer.plot_experiment(data, RAMSEY_SPEC, cfg=cfg, fit=fit, view=view, show=show)
 
 
     @staticmethod
-    def plot_t1(data, cfg=None, fit=True, contrast_mode="signal_minus_off", view="raw"):
+    def plot_t1(data, cfg=None, fit=True, contrast_mode="signal_minus_off", view="raw", show=True):
         # NOTE: This is configured for an inversion recovery T1 sequence with pi - tau - readout.
         def t1_model(x, A, t1, C):
             return A * np.exp(-x / t1) + C
@@ -475,4 +478,4 @@ class Visualizer:
             }
         }
 
-        Visualizer.plot_experiment(data, T1_SPEC, cfg=cfg, fit=fit, view=view)
+        return Visualizer.plot_experiment(data, T1_SPEC, cfg=cfg, fit=fit, view=view, show=show)

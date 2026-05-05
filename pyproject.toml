@@ -14,9 +14,11 @@ dependencies = [
     "tqdm",
     "scipy",
     "qick==0.2.302",
-    "itemattribute"
+    "itemattribute",
+    "pynqmetadata @ git+https://github.com/Xilinx/PYNQ-Metadata.git",
+    "pynqutils @ git+https://github.com/Xilinx/PYNQ-Utils.git",
     ]
-requires-python = ">=3.7"
+requires-python = ">=3.8"
 description = """
 Software for full quantum control of nitrogen-vacancy defects and other quantum defects in diamond
 through microwave and laser pulsing control.
@@ -26,9 +28,8 @@ license = {file = "LICENSE.md"}
 keywords = ["quantum control", "nitrogen vacancy", "fpga", "xilinx", "rfsoc", "qubit"]
 authors = [
     {name = "Andy Mounce", email = "amounce@sandia.gov"},
-    {name = "Emmeline Riendeau", email = "eriendeau@uchicago.edu"}]
-
-[tool.setuptools_scm]
+    {name = "Emmeline Riendeau", email = "eriendeau@uchicago.edu"}
+]
 
 [project.urls]
 Documentation = "https://readthedocs.org"

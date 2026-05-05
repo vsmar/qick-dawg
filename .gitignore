@@ -164,3 +164,9 @@ cython_debug/
 .docs/html
 .docs/doctrees
 *test.ipynb
+
+# ignore arqick
+src/qickdawg/dqp_mod/
+
+# ignore the data
+data/

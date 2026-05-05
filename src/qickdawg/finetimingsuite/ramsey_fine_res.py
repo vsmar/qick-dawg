@@ -151,8 +151,8 @@ class RamseyFineRes(ReadoutHelpers, NVAveragerProgram):
         Initialize spin → π/2_X → delay τ → π/2_X → Readout (and reference).
         """
         self.initialize_spin()
-        self.program_pulses(1)
-        self.readout_and_reference(self.program_pulses())
+        self.program_pulses()
+        self.readout_and_reference(self.program_pulses)
 
     def program_pulses(self):
         """ π/2_X → delay τ → π/2_X """
