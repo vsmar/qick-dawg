@@ -28,6 +28,7 @@ import yaml
 from pathlib import Path
 import numpy as np
 import qickdawg as qd
+import h5py
 
 # TODO: Once this is running well I'll just standardize the set-up and just have 1 path
 _ROOT = Path(__file__).resolve().parents[1]
@@ -164,6 +165,151 @@ def write_hdf5_attrs(group, attrs: dict):
         set_hdf5_attr(group, key, value)
 
 
+def _is_axis_dataset_name(name: str) -> bool:
+    """Return True if dataset name looks like a sweep axis (using suffix patterns)."""
+    if not name:
+        return False
+    s = str(name).lower()
+    if s == "sweep_pts":
+        return True
+    suffixes = (
+        "_ftns", "_ftsamp", "_ftus", "_tns", "_tsamp", "_tus",
+        "_fMHz", "_fGHz", "_freg", "_pdeg", "_preg",
+    )
+    return any(s.endswith(suf) for suf in suffixes)
+
+
+_AXIS_SUFFIX_GROUPS = {
+    "frequency": ("_fMHz", "_fGHz", "_freg"),
+    "fine_time": ("_ftsamp", "_ftns", "_ftus"),
+    "time": ("_tsamp", "_tns", "_tus"),
+    "phase": ("_pdeg", "_preg"),
+}
+
+
+def _axis_variant_names(axis_name: str) -> list[str]:
+    if not axis_name:
+        return []
+    if axis_name == "sweep_pts":
+        return [axis_name]
+    for suffixes in _AXIS_SUFFIX_GROUPS.values():
+        for suffix in suffixes:
+            if axis_name.endswith(suffix):
+                stem = axis_name[: -len(suffix)]
+                return [f"{stem}{alt}" for alt in suffixes]
+    return [axis_name]
+
+
+def _is_cts_s_dataset(name: str) -> bool:
+    """Return True if dataset name indicates count-rate (cts/s) data."""
+    return "_cts_s" in str(name).lower()
+
+
+def _normalize_data_for_hdf5(data_dict: dict) -> tuple:
+    """
+    Organize raw experiment data into structured groups.
+    
+    Returns
+    -------
+    (data_arrays, cts_s_arrays, axis_name, axis_data)
+        - data_arrays: signal/reference counts (excluding cts_s and contrast)
+        - cts_s_arrays: count-rate versions
+        - axis_name: name of sweep axis or None
+        - axis_data: the sweep axis array or None
+    """
+    data_arrays = {}
+    cts_s_arrays = {}
+    axis_name = None
+    axis_data = None
+    
+    for key, arr in data_dict.items():
+        if key == "contrast":
+            continue
+        if _is_axis_dataset_name(key):
+            axis_name = key
+            axis_data = np.asarray(arr)
+            continue
+        if _is_cts_s_dataset(key):
+            # Normalize count-rate key by removing the suffix `_cts_s` (case-insensitive)
+            if key.lower().endswith("_cts_s"):
+                base = key[: len(key) - 6]
+            else:
+                base = key
+            cts_s_arrays[base] = np.asarray(arr)
+        else:
+            data_arrays[key] = np.asarray(arr)
+    
+    return data_arrays, cts_s_arrays, axis_name, axis_data
+
+
+def _coerce_acquired_data_to_dict(data: object) -> dict:
+    """Convert acquired experiment output into a plain dict."""
+    if hasattr(data, "keys"):
+        return dict(data)
+    if hasattr(data, "__dict__"):
+        return dict(vars(data))
+    return {"data": np.asarray(data)}
+
+
+def _numeric_only_arrays(arrays: dict) -> dict:
+    """Keep only numeric arrays; drop strings/objects that cannot be aggregated."""
+    numeric = {}
+    for key, arr in arrays.items():
+        arr_np = np.asarray(arr)
+        if np.issubdtype(arr_np.dtype, np.number):
+            numeric[key] = arr_np
+    return numeric
+
+
+def normalize_acquired_data(data: object, sweep_axis_key: str = None) -> tuple:
+    """Normalize acquired data into numeric summary arrays and optional sweep axis.
+
+    Returns
+    -------
+    (data_arrays, cts_s_arrays, axis_name, axis_data, axis_variants)
+        data_arrays and cts_s_arrays contain only numeric arrays.
+    """
+    raw_data = _coerce_acquired_data_to_dict(data)
+    data_arrays, cts_s_arrays, detected_axis_name, detected_axis_data = _normalize_data_for_hdf5(raw_data)
+
+    data_arrays = _numeric_only_arrays(data_arrays)
+    cts_s_arrays = _numeric_only_arrays(cts_s_arrays)
+
+    axis_name = sweep_axis_key or detected_axis_name
+    axis_data = None
+    axis_variants: dict[str, np.ndarray] = {}
+
+    axis_candidates = []
+    if axis_name:
+        axis_candidates.extend(_axis_variant_names(axis_name))
+    if detected_axis_name and detected_axis_name not in axis_candidates:
+        axis_candidates.extend(_axis_variant_names(detected_axis_name))
+
+    for name in axis_candidates:
+        if name in raw_data:
+            candidate = np.asarray(raw_data[name])
+            if np.issubdtype(candidate.dtype, np.number):
+                axis_variants[name] = candidate
+
+    if axis_name and axis_name in axis_variants:
+        axis_data = axis_variants[axis_name]
+    elif detected_axis_name and detected_axis_name in axis_variants:
+        axis_data = axis_variants[detected_axis_name]
+    elif detected_axis_data is not None:
+        candidate = np.asarray(detected_axis_data)
+        if np.issubdtype(candidate.dtype, np.number):
+            axis_data = candidate
+
+    if axis_name and axis_data is not None and axis_name not in axis_variants:
+        axis_variants[axis_name] = axis_data
+
+    for axis_key in axis_variants:
+        data_arrays.pop(axis_key, None)
+
+    return data_arrays, cts_s_arrays, axis_name, axis_data, axis_variants
+
+
+
 def collect_required_cfg_attrs(cfg_obj, required_keys) -> dict:
     """Collect required_cfg values from NVConfiguration when present."""
     attrs = {}
@@ -224,10 +370,23 @@ def save_experiment_hdf5(
     data,
     output_dir: Path,
     experiment_name: str,
+    sweep_axis_key: str = None,
     custom_attrs: dict = None,
 ) -> tuple[Path, str]:
     """
     Save experiment data and metadata using the standard project HDF5 layout.
+    
+    Layout:
+      /metadata/          — attributes with experiment config
+      /axis/{axis_name}   — sweep axis data (stored once, easy to extract)
+      /summary_data/data/ — raw signal/reference traces
+      /summary_data/cts_s/ — count-rate versions
+
+    Parameters
+    ----------
+    sweep_axis_key : str, optional
+        Name of the sweep axis (e.g., "mw_duration_ftns", "mw_fMHz", "tau_ftns").
+        Stored as metadata; axis data will be saved under /axis/ if found.
 
     Returns
     -------
@@ -235,63 +394,45 @@ def save_experiment_hdf5(
         Saved file path and timestamp string used in the filename/metadata.
     """
     from datetime import UTC, datetime
-    import h5py
+    from experiments.helpers.data_manager import DataManager
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
     local_dt = datetime.now().astimezone()
-    utc_dt = datetime.now(UTC)
-
     timestamp_local = local_dt.strftime("%Y%m%d_%H%M%S")
-    timestamp_utc = utc_dt.strftime("%Y%m%d_%H%M%S")
+    run_id = timestamp_local
     out_path = output_dir / f"{experiment_name}_{timestamp_local}.h5"
 
-    with h5py.File(out_path, "w") as f:
-        if hasattr(data, "keys"):
-            data_group = f.create_group("data")
-            for key in data.keys():
-                value = data[key]
-                arr = np.asarray(value)
-                try:
-                    data_group.create_dataset(key, data=arr)
-                except TypeError:
-                    # Some analyzed fields are non-numeric (e.g., string labels such as sweep_param).
-                    # Persist them as attrs so saves never fail on dtype conversion.
-                    data_group.attrs[key] = str(value)
-        else:
-            f.create_dataset("data", data=np.asarray(data))
+    data_manager = DataManager(out_path, experiment_name, run_id)
+    
+    data_manager.write_initial_metadata(cfg_dict, program_class, config_obj, sweep_axis_key, custom_attrs)
 
-        config_yaml = yaml.dump(cfg_dict, sort_keys=False)
-        f.attrs["config_yaml_full"] = config_yaml
-        f.attrs["config_yaml"] = config_yaml
+    data_arrays, cts_s_arrays, detected_axis_name, axis_data, axis_variants = normalize_acquired_data(
+        data,
+        sweep_axis_key=sweep_axis_key,
+    )
 
-        required_attrs = collect_required_cfg_attrs(config_obj, program_class.required_cfg)
-        required_attrs = add_unit_pair_expansions(required_attrs, config_obj)
-
-        experiment_attrs = {}
-        experiment_attrs.update(required_attrs)
-        if custom_attrs:
-            experiment_attrs.update(custom_attrs)
-
-        # Canonical metadata keys set last so custom_attrs cannot override them.
-        experiment_attrs["timestamp"] = timestamp_local
-        experiment_attrs["timestamp_local"] = timestamp_local
-        experiment_attrs["timestamp_utc"] = timestamp_utc
-        experiment_attrs["timestamp_local_iso"] = local_dt.isoformat(timespec="seconds")
-        experiment_attrs["timestamp_utc_iso"] = utc_dt.isoformat(timespec="seconds")
-        exp = f.create_group("experiment")
-        write_hdf5_attrs(exp, experiment_attrs)
-
-        resolved_attrs = dict(experiment_attrs)
-        resolved_attrs["experiment_name"] = experiment_name
-        resolved_attrs["excitation_laser_power_mW"] = cfg_dict.get("optics", {}).get("excitation_laser_power_mW")
-
-        sample_cfg = cfg_dict.get("sample", {})
-        resolved_attrs["sample_id"] = sample_cfg.get("sample_id")
-        resolved_attrs["sil_id"] = sample_cfg.get("sil_id")
-        resolved_attrs["sample_notes"] = sample_cfg.get("notes")
-
-        resolved = f.create_group("resolved_config")
-        write_hdf5_attrs(resolved, resolved_attrs)
+    if sweep_axis_key is None:
+        sweep_axis_key = detected_axis_name
+    
+    if axis_variants or (sweep_axis_key and axis_data is not None):
+        data_manager.write_sweep_axis(sweep_axis_key, axis_data, axis_variants)
+    
+    with h5py.File(out_path, "a") as f:
+        summary_grp = f.require_group("summary_data")
+        data_grp = summary_grp.require_group("data")
+        cts_s_grp = summary_grp.require_group("cts_s")
+        
+        for key, arr in data_arrays.items():
+            try:
+                data_grp.create_dataset(key, data=arr)
+            except TypeError:
+                data_grp.attrs[key] = str(arr)
+        
+        for key, arr in cts_s_arrays.items():
+            try:
+                cts_s_grp.create_dataset(key, data=arr)
+            except TypeError:
+                cts_s_grp.attrs[key] = str(arr)
 
     return out_path, timestamp_local

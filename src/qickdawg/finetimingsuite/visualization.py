@@ -373,7 +373,7 @@ class Visualizer:
     def plot_ramsey(data, cfg=None, contrast_mode="signal_over_off", fit=True, view="raw", fit_mode="oscillatory", show=True):
         # NOTE: This is configured for a pi/2 Y - tau - pi/2 -Y Ramsey sequence.
         def ramsey_model(x, A, f, t2star, C):
-            return A * np.exp(-x / t2star) * np.cos(2 * np.pi * f * x) + C
+            return A * np.exp(-(x / t2star)**2) * np.cos(2 * np.pi * f * x) + C
             # TODO: Implement model capable of handling the 3 frequency components under hyperfine splitting
 
         def decay_model(x, A, t2star, C):

@@ -1,0 +1,20 @@
+reoptimization:
+  every_n_chunks: 1
+  last_reopt_utc: '2026-05-26T16:41:07+00:00'
+  last_status: success
+  piezo_initial_position_um:
+  - 2.7796026877351405
+  - -2.2025990072628137
+  - -4.2094584296582065
+  scan_pixels:
+    x: 100
+    y: 100
+    z: 100
+  scan_ranges_um:
+    x: 2.0
+    y: 2.0
+    z: 10.0
+  scan_times_s:
+    x: 5.0
+    y: 5.0
+    z: 5.0
