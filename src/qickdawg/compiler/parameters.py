@@ -7,10 +7,11 @@ Optional for fixed parameters, but allows user to specify units (MHz, GHz, degre
 """
 from __future__ import annotations
 from dataclasses import dataclass, fields
+from itertools import count
 from typing import Literal
  
 from sweep_axis import LinearSweepAxis, ExponentialSweepAxis, Pattern, RepeatAxis, SweepAxis
-from units import UNIT_TABLE
+from units import UNIT_TABLE, SI_DEFAULT_UNIT
 
 
 @dataclass(frozen=True)
@@ -54,3 +55,59 @@ class Parameter:
         if isinstance(self.axis, Pattern):
             return self.axis.axis
         return self.axis
+    
+    @property
+    def min_value(self) -> int | float | None:
+        if self.axis is None:
+            return self._constant_value
+        return self.axis.min_value # TODO: fallback needed for RepeatAxis and Pattern?
+
+
+
+# ----------- Helper Function -----------------------------------------------
+_param_autoname = count()
+
+def coerce_param(
+    value: int | float | Parameter | SweepAxis | RepeatAxis | Pattern | None,
+    kind: str,
+    *,
+    name: str | None = None,
+    field_name: str | None = None
+) -> Parameter | None:
+    """Normalize a user-supplied value to a Parameter, or None.
+
+    Allows user to use the swept axis or pattern as a handle,
+    by executing the appropriate conversion to a Parameter.
+
+    Identical parameters with different names are still identifiable by internal representation.
+
+    - None          → None (caller interprets as "inherit" or "unset")
+    - Parameter     → unchanged
+    - Pattern       → Parameter.from_pattern()
+    - SweepAxis     → Parameter.from_axis()
+    - RepeatAxis    → Parameter.from_axis()
+    - int | float   → Parameter.constant() in SI default unit for kind
+    """
+    if value is None:
+        return None
+    if isinstance(value, Parameter):
+        return value
+    if isinstance(value, Pattern):
+        return Parameter.from_pattern(value)
+    if isinstance(value, (SweepAxis, RepeatAxis)):
+        return Parameter.from_axis(value)
+
+    # bare number — wrap as SI constant
+    unit = SI_DEFAULT_UNIT[kind]
+    if name:       
+        return Parameter.constant(
+            name=name,
+            value=value,
+            unit=unit,
+        )
+    else:
+        return Parameter.constant(
+            name=f"_{field_name}_{next(_param_autoname)}",
+            value=value,
+            unit=unit,
+        )

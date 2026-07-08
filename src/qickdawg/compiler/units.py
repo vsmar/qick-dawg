@@ -52,13 +52,10 @@ class UnitSpec:
 
 UNIT_TABLE = {
     "ftsamp":   UnitSpec("ftsamp", "time", lambda x: x, requires_int=True),
-    "ns":       UnitSpec("ftsamp", "time", lambda x: qd.soccfg.us2cycles(x / 1e3) * FTSAMP_PER_TREG),
-    "us":       UnitSpec("ftsamp", "time", lambda x: qd.soccfg.us2cycles(x) * FTSAMP_PER_TREG),
-    "s":        UnitSpec("ftsamp", "time", lambda x: qd.soccfg.us2cycles(x * 1e6) * FTSAMP_PER_TREG),
-
-    "treg":     UnitSpec("ftsamp", "time", lambda x: x * 16, requires_int=True),
-    "ns":       UnitSpec("ftsamp", "time", lambda x: qd.soccfg.us2cycles(x / 1e3) * FTSAMP_PER_TREG),
-    "us":       UnitSpec("ftsamp", "time", lambda x: qd.soccfg.us2cycles(x) * FTSAMP_PER_TREG),
+    "treg":     UnitSpec("ftsamp", "time", lambda x: x * FTSAMP_PER_TREG, requires_int=True),
+    "ns":       UnitSpec("ftsamp", "time", lambda x: qd.soccfg.us2cycles(x / 1e3 * FTSAMP_PER_TREG)),
+    "us":       UnitSpec("ftsamp", "time", lambda x: qd.soccfg.us2cycles(x * FTSAMP_PER_TREG)),
+    "s":        UnitSpec("ftsamp", "time", lambda x: qd.soccfg.us2cycles(x * 1e6 * FTSAMP_PER_TREG)),
 
     "preg":     UnitSpec("preg", "phase", lambda x: x, requires_int=True, negative_allowed=True),
     "deg":      UnitSpec("preg", "phase", lambda x: qd.soccfg.deg2reg(x)),
@@ -73,7 +70,16 @@ UNIT_TABLE = {
     "count":    UnitSpec("count", "count", lambda x: x),
 }
 
+COARSE_TIME_UNIT_TABLE = {
+    "ftsamp":   UnitSpec("treg", "coarse_time", lambda x: x / FTSAMP_PER_TREG, requires_int=True),
+    "treg":     UnitSpec("treg", "coarse_time", lambda x: x, requires_int=True),
+    "us":       UnitSpec("treg", "coarse_time", lambda x: qd.soccfg.us2cycles(x)),
+    "ns":       UnitSpec("treg", "coarse_time", lambda x: qd.soccfg.us2cycles(x / 1e3)),
+    "s":        UnitSpec("treg", "coarse_time", lambda x: qd.soccfg.us2cycles(x * 1e6)),
+}
+
 SI_DEFAULT_UNIT = {
+    "coarse_time": "s",
     "time": "s",
     "phase": "deg",
     "frequency": "Hz",

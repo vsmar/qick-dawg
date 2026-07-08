@@ -40,7 +40,8 @@ fused with, pulses from a different segment.
 
 Rejected (non-affine) cases -- raised as ValueError
 ---------------------------------------------------
-  * exponential swept delay        (geometric accumulation) # NOTE: could unroll or modify exponential sweep to have a pseudo-affine form
+  * exponential swept delay        (geometric accumulation) '
+    # NOTE: could unroll or modify exponential sweep to have a pseudo-affine form
   * swept delay inside a repeat()   (bilinear body-duration * count)
   * Pattern as a delay duration     (patterns are phase-only anyway)
 
@@ -54,7 +55,11 @@ Dependencies not yet wired up
     .value accessor would read more cleanly here.
 """
 
-# NOTE: Forcing cursor time at sweeps might not be good, really this forced gridding happens at readouts we dont need to loop over
+# NOTE: Forcing cursor time at sweeps might not be good, 
+# really this forced gridding happens at readouts we dont need to loop over
+
+# Idea: build in slack for forcing regridding whenever a trigger / RO instruction occurs
+
 
 from __future__ import annotations
 
@@ -90,10 +95,10 @@ class AffineTime:
     # -- constructors / combinators -----------------------------------------
 
     @staticmethod
-    def const(n: int) -> "AffineTime":
+    def const(n: int) -> AffineTime:
         return AffineTime(base=int(n), _terms={})
 
-    def shifted(self, dt: int) -> "AffineTime":
+    def shifted(self, dt: int) -> AffineTime:
         return AffineTime(base=self.base + int(dt), _terms=dict(self._terms))
 
     def plus_counter(self, axis, coeff: int) -> "AffineTime":
@@ -109,14 +114,14 @@ class AffineTime:
             terms[key] = (prev_axis, new_coeff)
         return AffineTime(base=self.base, _terms=terms)
 
-    def scaled(self, k: int) -> "AffineTime":
+    def scaled(self, k: int) -> AffineTime:
         terms = {}
         for key, (axis, coeff) in self._terms.items():
             if coeff * k != 0:
                 terms[key] = (axis, coeff * k)
         return AffineTime(base=self.base * k, _terms=terms)
 
-    def __add__(self, other: "AffineTime") -> "AffineTime":
+    def __add__(self, other: AffineTime) -> AffineTime:
         terms = dict(self._terms)
         for key, (axis, coeff) in other._terms.items():
             prev_axis, prev_coeff = terms.get(key, (axis, 0))
@@ -127,7 +132,7 @@ class AffineTime:
                 terms[key] = (prev_axis, new_coeff)
         return AffineTime(base=self.base + other.base, _terms=terms)
 
-    def __sub__(self, other: "AffineTime") -> "AffineTime":
+    def __sub__(self, other: "AffineTime") -> AffineTime:
         return self + other.scaled(-1)
 
     # -- queries ------------------------------------------------------------

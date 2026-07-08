@@ -48,52 +48,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from itertools import count
 
-from parameters import Parameter
+from parameters import Parameter, coerce_param
 from pulses import DefinePulse
 from sweep_axis import Pattern, RepeatAxis, SweepAxis
 from units import SI_DEFAULT_UNIT
-
-_param_autoname = count()
-
-
-# ---------------------------------------------------------------------------
-# Parameter coercion
-# ---------------------------------------------------------------------------
-
-def _coerce_param(
-    value: int | float | Parameter | SweepAxis | RepeatAxis | Pattern | None,
-    kind: str,
-    field_name: str,
-) -> Parameter | None:
-    """Normalize a user-supplied value to a Parameter, or None.
-
-    Allows user to use the swept axis or pattern as a handle,
-    by executing the appropriate conversion to a Parameter.
-
-    - None          → None (caller interprets as "inherit" or "unset")
-    - Parameter     → unchanged
-    - Pattern       → Parameter.from_pattern()
-    - SweepAxis     → Parameter.from_axis()
-    - RepeatAxis    → Parameter.from_axis()
-    - int | float   → Parameter.constant() in SI default unit for kind
-    """
-    if value is None:
-        return None
-    if isinstance(value, Parameter):
-        return value
-    if isinstance(value, Pattern):
-        return Parameter.from_pattern(value)
-    if isinstance(value, (SweepAxis, RepeatAxis)):
-        return Parameter.from_axis(value)
-
-    # bare number — wrap as SI constant
-    unit = SI_DEFAULT_UNIT[kind]
-    return Parameter.constant(
-        name=f"_{field_name}_{next(_param_autoname)}",
-        value=value,
-        unit=unit,
-    )
-
 
 # ---------------------------------------------------------------------------
 # IR instruction types
@@ -128,7 +86,7 @@ class PlayIR:
             val = getattr(self, name)
             if val is None:
                 val = getattr(self.pulse, name)
-            setattr(self, name, _coerce_param(val, name, name))
+            setattr(self, name, coerce_param(val, name, field_name=name))
 
         if self.channel is None:
             self.channel = self.pulse.channel
@@ -148,7 +106,7 @@ class DelayIR:
     channel:  int
 
     def __post_init__(self):
-        self.duration = _coerce_param(self.duration, "time", "duration")
+        self.duration = coerce_param(self.duration, "time", field_name="duration")
         if not isinstance(self.channel, int) or self.channel < 0:
             raise ValueError(
                 f"DelayIR: channel must be a non-negative int, got {self.channel!r}."
@@ -268,17 +226,17 @@ class sweep:
     Usage:
 
         t = LinearSweepAxis.create("delay", 0, 100e-6, 1e-6, unit="s")
-        f = LinearSweepAxis.create("freq", 5e9, 5.1e9, 1e6, unit="Hz")
+        f = LinearSweepAxis.create("frequency", 5e9, 5.1e9, 1e6, unit="Hz")
 
         # co-varying (one loop, two register updates per step)
         with sweep(t, f):
-            play(pi_pulse, freq=f)
+            play(pi_pulse, frequency=f)
             delay(t, channel=0)
 
         # nested (two independent loops)
         with sweep(t):
             with sweep(f):
-                play(pi_pulse, freq=f)
+                play(pi_pulse, frequency=f)
                 delay(t, channel=0)
     """
 

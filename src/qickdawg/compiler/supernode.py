@@ -1,36 +1,34 @@
 """
 Supernode + waveform construction passes for QICK-DAWG.
 
-Consumes the affine timing IR (timing.TimedInstruction, per channel) and
-produces reusable baseband SuperNodes plus per-channel programs of
+Consumes the affine timing IR (timing.TimedInstruction, per channel) to
+produce reusable baseband SuperNodes plus per-channel programs of
 SuperNodeInstance / ConstantPulseInstance, then lays out waveform memory.
 
-Design decisions baked in (confirmed)
+Design decisions
 -------------------------------------
 1. Grouping stability. Two waveform pulses fuse into one SuperNode only when
    they share a segment id, share a frequency, and the gap between them is a
    *constant* under the 2-treg deadtime. A swept gap can never be an internal
    supernode gap: its minimum over all iterations is required to be >= 2 treg
    (else a hard timing error), so a swept delay is always a boundary.
+   NOTE: This is a conservative bound on the gap (true bound is the prior pulse's deadtime).
 
 2. Uniform sweeps only. If a value is swept inside a multi-block supernode it
    must be swept *identically* for every block (same axis object), so it lives
    purely on the instance as a global phase/amp/freq and leaves the baseband
    shape iteration-invariant. Sweeping only one block of a fused pair is
-   refused for now (the pulsepol-style case -> write it as separate pulses).
+   refused for now 
+   NOTE: pulsepol-style cases can be written as separate pulses instead
+   NOTE: phase patterning inside a supernode (possible in qick) but not yet supported here
 
-3. Timing violations are reported explicitly rather than silently repaired.
-
-Not yet supported (rejected, noted for future revision)
--------------------------------------------------------
-  * A phase Pattern inside a multi-block supernode (would need >1 supernode /
-    rollout to enumerate the per-index shapes). A Pattern on a single-pulse
-    supernode is fine -- it is just that instance's global phase.
+3. Timing violations are reported explicitly.
 
 Dependencies
 ------------
-  * pulses.DefinePulse / Shape (waveform_mode, shape, length_treg,
-    preferred_resolution, and Shape.content_hash / .data / .length).
+  * pulses.DefinePulse / .Shape:
+        waveform_mode, shape, length_treg, preferred_resolution, 
+        Shape.content_hash / .data / .length
   * Converting a canonical phase register value back to degrees uses the
     hardware inverse qd.soccfg.reg2deg (see _preg_to_deg). Only the
     constant-composite case (e.g. pulsepol 0/90/90/0) exercises it; the
@@ -38,7 +36,7 @@ Dependencies
 """
 
 # TODO: Deal with phase, inconvenient to convert back and forth
-# Probably fine to have bith a converted a regular form??
+# Probably fine to have both forms??
 
 from __future__ import annotations
 
@@ -59,10 +57,13 @@ SPLIT_GAP = 2 * FTSAMP_PER_TREG      # waveform pulses closer than this must fus
 # ---------------------------------------------------------------------------
 
 def _same_param(p, q) -> bool:
-    """Two Parameters drive the same register value across all iterations.
+    """ Determine if pulses are dependent on the same parameter.
+    
+    NOTE: This is overly conservative 
+    TODO: For phase and amplitude its the ratio that matters
 
-    Constant: equal canonical value. Swept: the *same* axis/pattern object
-    (identity), which is what the uniform-sweep rule requires.
+    Constant: equal canonical value
+    Swept: the *same* axis/pattern object.
     """
     if p is None or q is None:
         return p is q
@@ -96,7 +97,10 @@ def _preg_to_deg(preg: int) -> float:
 
 @dataclass(frozen=True)
 class SuperNodeBlock:
-    """One pulse's contribution to a baseband supershape.
+    """Single pulse contribution to a baseband "supershape" (ie SuperNode).
+
+    Fundamental building block of a supernode.
+    SuperNodes constant timing (no swept parameters)
 
     rel_phase is in DEGREES and rel_amplitude is a ratio, both iteration-
     invariant, so they can key the reusable shape.
@@ -114,7 +118,14 @@ class SuperNodeBlock:
 
 @dataclass(frozen=True)
 class SuperNode:
-    """Unique reusable baseband supershape definition."""
+    """The baseband supershape.
+
+    Hashable for quick comparisons, making the object reusable across all
+    identical instances.
+
+    equivalent_shape:
+      The amalgamated pulse shape, used for defining the waveforms.
+    """
     blocks: tuple[SuperNodeBlock, ...]
     duration_ftsamp: int
     preferred_resolution: int

@@ -48,6 +48,11 @@ class SweepAxis:
     canonical_unit: str
     kind: str
 
+    @property
+    def min_value(self):
+        return min(self.start, self.stop)
+
+
 @dataclass(frozen=True)
 class LinearSweepAxis(SweepAxis):
     step: int | float
@@ -68,7 +73,7 @@ class LinearSweepAxis(SweepAxis):
         c_stop = c_start + num_steps * c_step
 
         return cls(name, c_start, c_stop, num_steps, spec.canonical_unit, spec.kind, c_step)
-    
+
 
 _EXP_FACTORS: dict[str, tuple[int, int]] = {
     "3/2": (3, 2),
