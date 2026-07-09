@@ -26,26 +26,26 @@ from experiments.helpers.plotting import make_chunked_plot_callback
 # =============================================================================
 
 # Sweep bounds in MHz.
-ODMR_START_fMHz = 1833
-ODMR_STOP_fMHz = 1840
-ODMR_DELTA_fMHz = 0.05
+ODMR_START_fMHz = 3893 # 1842 
+ODMR_STOP_fMHz = 3900 # 1849
+ODMR_DELTA_fMHz = 0.10
 
-REPS = 200_000
+REPS = 800_000
 
-RUN_MODE = "chunked"  # "single" or "chunked"
-TARGET_TOTAL_REPS = 1_200_000*3
+RUN_MODE = "single"  # "single" or "chunked"
+TARGET_TOTAL_REPS = 1_200_000
 CHUNK_REPS = 400_000
 ACQUIRE_PROGRESS = True
 
 # Transition — set to "lower_dip", "upper_dip", or None to use config default.
-TRANSITION = None
+TRANSITION = "upper_dip"
 
 # Optional per-run overrides. If None, values come from selected transition.
-OVERRIDE_MW_GAIN = 500 # 2000
+OVERRIDE_MW_GAIN = 1200 #500 # 2000
 
 # Set either ftsamp directly, or ns (which will be converted to ftsamp).
 OVERRIDE_MW_PI_FTSAMP = None
-OVERRIDE_MW_PI_NS = 2300 # 500
+OVERRIDE_MW_PI_NS = 2500 # 2300
 
 GET_REFERENCE = True
 

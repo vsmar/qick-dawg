@@ -44,7 +44,7 @@ SAVED_AXIS_KEY = "tau_ftns"
 TRANSITION = None
 
 # Optional per-run overrides. If None, values come from selected transition.
-OVERRIDE_FREQ_FMHZ = None
+OVERRIDE_FREQ_FMHZ = 1838.15-2
 OVERRIDE_MW_GAIN = None
 OVERRIDE_MW_PI2_FTSAMP = None
 OVERRIDE_MW_PI2_FTNS = None

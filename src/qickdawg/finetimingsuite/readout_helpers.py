@@ -125,22 +125,55 @@ class ReadoutHelpers:
         soccfg = self.cfg.soccfg
 
         def _reg2freq_array(reg_arr):
-            return np.asarray([soccfg.reg2freq(int(r)) for r in reg_arr], dtype=float)
+            # Handle large integers by converting each element safely
+            result = []
+            for r in reg_arr:
+                freq = soccfg.reg2freq(int(r))
+                result.append(freq)
+            return np.asarray(result, dtype=np.float64)
 
         def _freq2reg_array(freq_arr_mhz):
-            return np.asarray([soccfg.freq2reg(float(f)) for f in freq_arr_mhz], dtype=int)
+            # Handle large integers that exceed C long limits
+            # First try with standard int dtype, fall back to object dtype if values are too large
+            regs = [soccfg.freq2reg(float(f)) for f in freq_arr_mhz]
+            try:
+                return np.asarray(regs, dtype=int)
+            except OverflowError:
+                # For very large register values, keep as Python objects
+                return np.asarray(regs, dtype=object)
 
         def _cycles2us_array(cycles_arr):
-            return np.asarray([soccfg.cycles2us(int(c)) for c in cycles_arr], dtype=float)
+            result = []
+            for c in cycles_arr:
+                us = soccfg.cycles2us(int(c))
+                result.append(us)
+            return np.asarray(result, dtype=np.float64)
 
         def _us2cycles_array(us_arr):
-            return np.asarray([soccfg.us2cycles(float(u)) for u in us_arr], dtype=int)
+            # Handle large integers that exceed C long limits
+            regs = [soccfg.us2cycles(float(u)) for u in us_arr]
+            try:
+                return np.asarray(regs, dtype=int)
+            except OverflowError:
+                # For very large register values, keep as Python objects
+                return np.asarray(regs, dtype=object)
 
         def _reg2deg_array(reg_arr):
-            return np.asarray([soccfg.reg2deg(int(r)) for r in reg_arr], dtype=float)
+            # Handle large integers by converting each element safely
+            result = []
+            for r in reg_arr:
+                deg = soccfg.reg2deg(int(r))
+                result.append(deg)
+            return np.asarray(result, dtype=np.float64)
 
         def _deg2reg_array(deg_arr):
-            return np.asarray([soccfg.deg2reg(float(p)) for p in deg_arr], dtype=int)
+            # Handle large integers that exceed C long limits
+            regs = [soccfg.deg2reg(float(p)) for p in deg_arr]
+            try:
+                return np.asarray(regs, dtype=int)
+            except OverflowError:
+                # For very large register values, keep as Python objects
+                return np.asarray(regs, dtype=object)
 
         if suffix in ('fMHz', 'fGHz', 'freg'):
             if suffix == 'fMHz':

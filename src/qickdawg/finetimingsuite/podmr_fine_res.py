@@ -107,5 +107,5 @@ class PODMRFineRes(ReadoutHelpers, NVAveragerProgram):
         Delegates to ReadoutHelpers.acquire() → NVAveragerProgram.acquire(), 
         tagging the sweep axis as 'mw_fMHz'.
         """
-        data = super().acquire(raw_data=raw_data, sweep_param='mw_fMHz', *arg, **kwarg)
+        data = super().acquire(raw_data=raw_data, sweep_param='mw_fMHz', *arg, **kwarg) 
         return data

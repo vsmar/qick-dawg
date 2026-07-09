@@ -26,14 +26,14 @@ from experiments.helpers.plotting import make_chunked_plot_callback
 
 # Sweep bounds in nanoseconds.
 # NVConfiguration handles conversion to ftsamp/treg companion units.
-MW_DURATION_START_FTNS = 5     # ftns
-MW_DURATION_STOP_FTNS  = 500    #2000    # ftns
-MW_DURATION_DELTA_FTNS = 1     # ftns  (step size)
+MW_DURATION_START_FTNS = 10000     # ftns
+MW_DURATION_STOP_FTNS  = 10500    #2000    # ftns
+MW_DURATION_DELTA_FTNS = 2     # ftns  (step size)
 
 REPS = 100_000 #*3 # 4
 
 RUN_MODE = "chunked"  # "single" or "chunked"
-TARGET_TOTAL_REPS = 1_000_000
+TARGET_TOTAL_REPS = 300_000
 CHUNK_REPS = 100_000
 ACQUIRE_PROGRESS = True
 
@@ -41,7 +41,7 @@ ACQUIRE_PROGRESS = True
 TRANSITION    = None   # None = use calibration.default_transition
 
 # Optional per-run overrides. If left None, values come from transition calibration.
-OVERRIDE_FREQ_FMHZ = None   # e.g. 1845.7
+OVERRIDE_FREQ_FMHZ = 1838.15-0.6   # e.g. 1845.7
 OVERRIDE_MW_GAIN  = None   # e.g. 1200
 
 GET_REFERENCE = True          # acquire reference readout with MW gain = 0

@@ -23,7 +23,7 @@ from experiments.helpers.plotting import make_chunked_plot_callback
 
 # T1 delay sweep bounds in microseconds.
 T1_DELAY_START_TUS = 1.0
-T1_DELAY_END_TUS = 3000 #00.0
+T1_DELAY_END_TUS = 4000 #00.0
 
 SCALING_MODE = "exponential"  # "linear" or "exponential"
 T1_DELAY_DELTA_TUS = 400.0  # Ignored when SCALING_MODE is "exponential"
@@ -32,8 +32,8 @@ SCALING_FACTOR = "5/4"  # Ignored when SCALING_MODE is "linear"
 REPS = 30_000
 
 RUN_MODE = "chunked"  # "single" or "chunked"
-TARGET_TOTAL_REPS = 240_000
-CHUNK_REPS = 30_000
+TARGET_TOTAL_REPS = 200_000
+CHUNK_REPS = 20_000
 ACQUIRE_PROGRESS = True
 
 # Transition - set to "lower_dip", "upper_dip", or None to use config default.

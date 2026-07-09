@@ -26,15 +26,15 @@ from experiments.helpers.plotting import make_chunked_plot_callback
 
 # Sweep bounds in fine-time nanoseconds (ftns).
 TAU_START_FTNS = 200.0
-TAU_END_FTNS = 800_000.0
+TAU_END_FTNS = 1_000_000.0
 TAU_DELTA_FTNS = 0.0 # Ignored when scaling_mode is 'exponential'
-SCALING_FACTOR = "9/8"
+SCALING_FACTOR = "5/4"
 
 REPS = 50_000
 
 RUN_MODE = "chunked"  # "single" or "chunked"
-TARGET_TOTAL_REPS = 280_000
-CHUNK_REPS = 40_000
+TARGET_TOTAL_REPS = 350_000
+CHUNK_REPS = 50_000
 ACQUIRE_PROGRESS = True
 
 # Transition set to "lower_dip", "upper_dip", or None to use config default.

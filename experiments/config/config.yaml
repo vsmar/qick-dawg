@@ -48,7 +48,7 @@ photon_counting:
 # Update before each run series.
 # -----------------------------------------------------------------------------
 optics:
-  excitation_laser_power_mW: 0.140 # 065  # REQUIRED — measure and update before running
+  excitation_laser_power_mW: 0.143 # 065  # REQUIRED — measure and update before running
   excitation_laser_wavelength_nm: 532
 
 
