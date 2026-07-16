@@ -19,13 +19,20 @@ Parameter conventions (shared with ir.play / ir.delay via parameters.py)
                        e.g. Parameter.constant("len", 512, "ftsamp")
                        (Can be constants anywhere, or sweeps / patterns for DefinePulse fields)
 
-DefinePulse.amplitude / .phase / .freq accept swept or patterned values.
-Lengths (Shape factories, DefinePulse.length) accept CONSTANTS ONLY.
-A pulse's length fixes its waveform-memory footprint, so sweeping it in Shape is structurally unsupported.
+DefinePulse.amplitude / .phase / .frequency accept swept or patterned values.
+
+Two pulse modes, two length rules:
+  * arbitrary waveform (shape=...): the Shape fixes the length. Shape factory
+    lengths accept CONSTANTS ONLY -- a shape's length fixes its waveform-
+    memory footprint, so sweeping it is structurally unsupported.
+  * constant-amplitude coarse mode (length_coarse=...): the tProc itself
+    counts the pulse out in treg, so the length is a coarse_time Parameter
+    and MAY BE SWEPT (LinearSweepAxis with kind="coarse_time"). The timing
+    pass keeps a swept length affine exactly like a swept delay.
 
 NOTE: bare-number lengths are SECONDS under this convention (SI default for
 time), no longer raw DAC samples. Use Parameter.constant(name, n, "ftsamp")
-or "treg" for sample-exact lengths.
+or "treg" (with kind="coarse_time" for coarse lengths) for sample-exact values.
 """
 
 from dataclasses import dataclass, field
@@ -34,12 +41,36 @@ from typing import Callable, Literal
 import hashlib
 import numpy as np
 
-from parameters import Parameter, coerce_param
-from units import FTSAMP_PER_TREG, DAC_SAMPLE_RATE, WAVEFORM_MEMORY_SIZE, SAMPLE_SIZE
+from .parameters import Parameter, coerce_param
+from .units import FTSAMP_PER_TREG, DAC_SAMPLE_RATE, WAVEFORM_MEMORY_SIZE, SAMPLE_SIZE
 
 # A single shape longer than this cannot fit waveform memory.
 # Catches the mistake of passing a sample count where seconds are expected.
 _MAX_SHAPE_FTSAMP = WAVEFORM_MEMORY_SIZE * FTSAMP_PER_TREG
+
+
+def _shape_length_ftsamp(length, where: str) -> int:
+    """Shape length -> ftsamp int. Constant fine-time values only."""
+    param = coerce_param(length, "time", name=where)
+    if param is None:
+        raise ValueError(f"{where}: a length is required.")
+    if not param.is_constant:
+        raise ValueError(
+            f"{where} must be a constant; it is driven by "
+            f"{type(param.axis).__name__} "
+            f"'{getattr(param.axis, 'name', param.name)}'. Shapes cannot be "
+            f"swept -- use a constant-amplitude coarse-mode pulse "
+            f"(DefinePulse(length_coarse=...)) for sweepable lengths."
+        )
+    n = int(param.value)
+    if n > _MAX_SHAPE_FTSAMP:
+        raise ValueError(
+            f"{where}: {n} ftsamp is beyond what waveform memory can hold "
+            f"({_MAX_SHAPE_FTSAMP} ftsamp at resolution 16). If a bare-number "
+            f"length was meant as samples, note bare lengths are seconds; use "
+            f"Parameter.constant(name, n, 'ftsamp')."
+        )
+    return n
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +126,7 @@ class Shape:
 
     @staticmethod
     def square(length):
-        n = coerce_param(length, "time", name=f"Shape.square length")
+        n = _shape_length_ftsamp(length, "Shape.square length")
         data = np.ones(n, dtype=float)
         return Shape(data=data, params={"source": "square"})
 
@@ -104,7 +135,7 @@ class Shape:
         """
         length: seconds, or a constant time Parameter (e.g. unit="ftsamp")
         """
-        n = coerce_param(length, "time", name=f"Shape.hermite length")
+        n = _shape_length_ftsamp(length, "Shape.hermite length")
         t = np.arange(n, dtype=float)
         u = ((t - n / 2) / (0.1667 * n)) ** 2
         f = (1 - eta * u) * np.exp(-u)
@@ -118,7 +149,7 @@ class Shape:
 
     @staticmethod
     def from_func(func: Callable, length, **params):
-        n = coerce_param(length, "time", name=f"Shape.from_func length")
+        n = _shape_length_ftsamp(length, "Shape.from_func length")
         t = np.arange(0, n)
         arr = np.asarray(func(t, **params))
         return Shape(data=arr, params={"source": "custom_func", **params})
@@ -150,8 +181,8 @@ class Shape:
 class DefinePulse:
     """ User-facing default pulse definition.
 
-    amplitude / phase / freq follow the shared parameter convention and are
-    stored as Parameter after __post_init__:
+    amplitude / phase / frequency follow the shared parameter convention and
+    are stored as Parameter after __post_init__:
         bare number             -> constant, SI units (amp ratio, deg, Hz)
         Parameter               -> as constructed (explicit units)
         SweepAxis / RepeatAxis  -> swept handle
@@ -160,8 +191,11 @@ class DefinePulse:
 
     Modes:
         arbitrary waveform: Requires shape, length inherited from shape
-        constant-amplitude/phase coarse mode: Requires length_coarse, bare numbers are SECONDS (no shape)
-        length_coarse must land on a treg boundary, sweepable.
+        constant-amplitude/phase coarse mode: Requires length_coarse, bare
+        numbers are SECONDS (no shape). length_coarse is a coarse_time
+        Parameter (canonical treg) and is SWEEPABLE: pass a LinearSweepAxis
+        created with kind="coarse_time" and the timing pass keeps the pulse
+        end affine in that counter.
 
     NOTE:
         Any waveform can be encoded with up to 1 amplitude, but select waveforms can have higher amplitude cielings
@@ -170,7 +204,7 @@ class DefinePulse:
     name: str
     amplitude: object    # -> Parameter; constants must satisfy [0, ceiling]
     phase: object        # -> Parameter; bare numbers are deg
-    frequency: object         # -> Parameter; bare numbers are Hz
+    frequency: object    # -> Parameter; bare numbers are Hz
     channel: int
 
     shape: Shape | None = None    # Only set when waveform_mode = True
@@ -203,38 +237,50 @@ class DefinePulse:
             )
 
         # -- value parameters (swept / patterned allowed) ---------------------
-        for fname, canonical in (("amplitude"),
-                                    ("phase"),
-                                    ("frequency")):
-            param = coerce_param(getattr(self, fname), fname, f"{self.name}.{fname}")
+        for fname in ("amplitude", "phase", "frequency"):
+            param = coerce_param(getattr(self, fname), fname,
+                                 name=f"{self.name}.{fname}")
             if param is None:
                 raise ValueError(f"Pulse '{self.name}': {fname} is required.")
             object.__setattr__(self, fname, param)
 
-        # -- constant-amplitude/phase coarse mode length -----------------------------------------------
+        # -- constant-amplitude/phase coarse mode length (sweepable) ----------
         if self.length_coarse is not None:
-            param = coerce_param(self.length_coarse, "coarse_time", f"{self.name}.length_coarse")
-            if param.min_value < 3:
+            param = coerce_param(self.length_coarse, "coarse_time",
+                                 name=f"{self.name}.length_coarse")
+            if param.min_value is None or param.min_value < 3:
                 raise ValueError(
-                    f"Pulse '{self.name}': length must be at least 3 treg, got {param.min_value} treg "
-                    f"({3 * FTSAMP_PER_TREG} DAC samples)."
+                    f"Pulse '{self.name}': length must be at least 3 treg "
+                    f"({3 * FTSAMP_PER_TREG} DAC samples) over every "
+                    f"iteration, got minimum {param.min_value} treg."
                 )
+            object.__setattr__(self, "length_coarse", param)
             # constant-amp/phase coarse mode pulses are tProc-generated at treg granularity
             object.__setattr__(self, "preferred_resolution", 16)
 
     # TODO: Implement preliminary amplitude validation
 
     @property
-    def length_treg(self) -> object | None:
+    def length_treg(self) -> Parameter | None:
+        """Coarse-mode length handle (a coarse_time Parameter, maybe swept)."""
         return self.length_coarse
 
     @property
     def length_ftsamp(self) -> int:
+        """Concrete length in ftsamp. Only defined when the length is fixed:
+        waveform mode, or coarse mode with a constant length. A swept coarse
+        length has no single length -- the timing pass and simulator read
+        length_coarse directly and keep the end time affine in its counter.
+        """
         if self.waveform_mode:
             return self.shape.length
-        else: # FIXME: Crucial logic for visualizing pulse sweeps, currently only passes min value
-            # NOTE: affine timing also needs to be modified to support constant-amplitude coarse mode pulse sweeps
-            return self.length_treg.min_value * FTSAMP_PER_TREG
+        if self.length_coarse.is_constant:
+            return self.length_coarse.value * FTSAMP_PER_TREG
+        raise ValueError(
+            f"Pulse '{self.name}' has a swept coarse length "
+            f"('{self.length_coarse.name}'); there is no single "
+            f"length_ftsamp. Use length_coarse (affine in its counter)."
+        )
 
     @property
     def length_sec(self) -> float:

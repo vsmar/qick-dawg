@@ -24,11 +24,13 @@ Currently only phase is supported.
 Additionally the masking + shift procedure used, places restrictions on the encodable values and the pattern length.
 """
 
+from __future__ import annotations
+
 import math
 from dataclasses import dataclass
 from typing import Literal
 
-from units import UNIT_TABLE, UnitSpec
+from .units import UnitSpec, resolve_unit
 
 REGISTER_SIZE = 16 # TODO: Verify whether using 32 bits of the register is prohibitive 
                    # I believe it takes more instructions to load, but might be worth enabling
@@ -58,8 +60,10 @@ class LinearSweepAxis(SweepAxis):
     step: int | float
 
     @classmethod
-    def create(cls, name, start, stop, unit, step) -> SweepAxis:
-        spec: UnitSpec = UNIT_TABLE[unit]
+    def create(cls, name, start, stop, unit, step, kind: str | None = None) -> SweepAxis:
+        """kind disambiguates unit names shared across kinds; e.g. a swept
+        coarse pulse length is created with unit="treg", kind="coarse_time"."""
+        spec: UnitSpec = resolve_unit(unit, kind)
         c_start = spec.convert(start)
         c_stop = spec.convert(stop) 
         c_step = spec.convert(step)
@@ -88,8 +92,8 @@ class ExponentialSweepAxis(SweepAxis):
     denom: int
 
     @classmethod
-    def create(cls, name, start, stop, factor, unit) -> SweepAxis:
-        spec: UnitSpec = UNIT_TABLE[unit]
+    def create(cls, name, start, stop, factor, unit, kind: str | None = None) -> SweepAxis:
+        spec: UnitSpec = resolve_unit(unit, kind)
         c_start = spec.convert(start)
         c_stop = spec.convert(stop)
 
@@ -149,6 +153,10 @@ class RepeatAxis:
                 f"got {type(self.bound).__name__}."
             )
 
+    @property
+    def min_value(self) -> int:
+        return 0   # the counter itself; iterations run [0, bound)
+
 @dataclass(frozen=True)
 class Pattern:
     values: tuple[int | float, ...]
@@ -156,9 +164,13 @@ class Pattern:
     kind: str
     axis: SweepAxis | RepeatAxis
 
+    @property
+    def min_value(self) -> int | float:
+        return min(self.values)
+
     @classmethod
     def create(cls, values: list[int | float], unit: str, axis: SweepAxis | RepeatAxis) -> Pattern:
-        spec: UnitSpec = UNIT_TABLE[unit]
+        spec: UnitSpec = resolve_unit(unit)   # phase units are unambiguous
 
         if spec.kind != "phase":
             raise ValueError(f"Patterns only supports phase, got {spec.kind}")
@@ -177,15 +189,8 @@ class Pattern:
         maximum = max(diffs)
         nonzero = [d for d in diffs if d != 0]
         gcd = math.gcd(*nonzero)
-        encoding_bits = math.log2(maximum / gcd)
-        if encoding_bits % 1 != 0:
-            raise ValueError(
-                f"Pattern values cannot be encoded in a valid bit representation"
-            )
-        else:
-            encoding_bits = int(encoding_bits)
-
-        if encoding_bits * n > REGISTER_SIZE:
+        encoding_bits = math.ceil(math.log2(maximum / gcd + 1)) # +1 because we neeed to encode the zero value too
+        if encoding_bits > (REGISTER_SIZE / n):
             raise ValueError(
                 f"Pattern values cannot be encoded in a valid bit representation. \n"
                 f"Requires {encoding_bits} bits per value,"

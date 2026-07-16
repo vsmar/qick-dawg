@@ -30,7 +30,8 @@ Dependencies
         waveform_mode, shape, length_treg, preferred_resolution, 
         Shape.content_hash / .data / .length
   * Converting a canonical phase register value back to degrees uses the
-    hardware inverse qd.soccfg.reg2deg (see _preg_to_deg). Only the
+    active soccfg's reg2deg via units.get_soccfg() -- board inverse when
+    connected, SoftSocCfg's software inverse otherwise. Only the
     constant-composite case (e.g. pulsepol 0/90/90/0) exercises it; the
     uniform-swept case has relative phase 0 and never calls it.
 """
@@ -43,10 +44,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-import qickdawg as qd
 
-from timing import AffineTime, TimedInstruction
-from units import FTSAMP_PER_TREG, SAMPLE_SIZE, WAVEFORM_MEMORY_SIZE
+from .parameters import Parameter
+from .timing import AffineTime, TimedInstruction
+from .units import FTSAMP_PER_TREG, SAMPLE_SIZE, WAVEFORM_MEMORY_SIZE, get_soccfg
 
 SAMPLE_AMP = 2 ** (SAMPLE_SIZE - 1) - 1
 SPLIT_GAP = 2 * FTSAMP_PER_TREG      # waveform pulses closer than this must fuse
@@ -81,7 +82,7 @@ def _is_pattern_backed(p) -> bool: # TODO: Review
 
 def _preg_to_deg(preg: int) -> float:
     """Canonical phase register -> degrees, via the hardware inverse."""
-    reg2deg = getattr(qd.soccfg, "reg2deg", None)
+    reg2deg = getattr(get_soccfg(), "reg2deg", None)
     if reg2deg is None:
         raise NotImplementedError(
             "Folding a constant per-block phase offset into a baseband shape "
@@ -204,8 +205,6 @@ def _analyze_phase(phases, multiblock: bool):
 
 def _analyze_amplitude(amps):
     """Return (base_amp_param, rel_amplitudes) enforcing the uniform rule."""
-    from parameters import Parameter
-
     if any(not a.is_constant for a in amps):
         ref = amps[0]
         for a in amps:

@@ -4,14 +4,21 @@ Parameter handles for explicitly defined parameters.
 
 Necessary for handling parameters values dependent on sweeps and patterns.
 Optional for fixed parameters, but allows user to specify units (MHz, GHz, degrees, us, etc.).
+
+Unit kinds: some unit names exist under more than one kind ("us"/"treg"/
+"ftsamp" are both fine "time" and "coarse_time"). Parameter.constant takes an
+optional kind to disambiguate; without it, fine time wins for shared names.
+coerce_param always knows the kind from its call site and checks that any
+pre-built Parameter / axis landed in that kind's canonical unit, so e.g. a
+fine-time axis passed where a coarse length is expected fails at definition.
 """
 from __future__ import annotations
 from dataclasses import dataclass, fields
 from itertools import count
 from typing import Literal
  
-from sweep_axis import LinearSweepAxis, ExponentialSweepAxis, Pattern, RepeatAxis, SweepAxis
-from units import UNIT_TABLE, SI_DEFAULT_UNIT
+from .sweep_axis import LinearSweepAxis, ExponentialSweepAxis, Pattern, RepeatAxis, SweepAxis
+from .units import KIND_CANONICAL, SI_DEFAULT_UNIT, resolve_unit
 
 
 @dataclass(frozen=True)
@@ -22,8 +29,9 @@ class Parameter:
     _constant_value: int | float | None = None
 
     @classmethod
-    def constant(cls, name: str | None, value: int | float, unit: str) -> Parameter:
-        spec = UNIT_TABLE[unit]
+    def constant(cls, name: str | None, value: int | float, unit: str,
+                 kind: str | None = None) -> Parameter:
+        spec = resolve_unit(unit, kind)
         return cls(name, None, spec.canonical_unit, _constant_value=spec.convert(value))
     
     @classmethod
@@ -55,12 +63,22 @@ class Parameter:
         if isinstance(self.axis, Pattern):
             return self.axis.axis
         return self.axis
-    
+
+    @property
+    def value(self) -> int | float:
+        """Canonical value of a constant Parameter (public accessor)."""
+        if not self.is_constant:
+            raise ValueError(
+                f"Parameter '{self.name}' is driven by "
+                f"{type(self.axis).__name__}; it has no single value."
+            )
+        return self._constant_value
+
     @property
     def min_value(self) -> int | float | None:
         if self.axis is None:
             return self._constant_value
-        return self.axis.min_value # TODO: fallback needed for RepeatAxis and Pattern?
+        return self.axis.min_value
 
 
 
@@ -87,27 +105,41 @@ def coerce_param(
     - SweepAxis     → Parameter.from_axis()
     - RepeatAxis    → Parameter.from_axis()
     - int | float   → Parameter.constant() in SI default unit for kind
+
+    Every non-bare value is checked against the kind's canonical unit, so a
+    handle built in the wrong unit system is rejected at the boundary.
     """
     if value is None:
         return None
-    if isinstance(value, Parameter):
-        return value
-    if isinstance(value, Pattern):
-        return Parameter.from_pattern(value)
-    if isinstance(value, (SweepAxis, RepeatAxis)):
-        return Parameter.from_axis(value)
 
-    # bare number — wrap as SI constant
-    unit = SI_DEFAULT_UNIT[kind]
-    if name:       
+    if isinstance(value, Parameter):
+        param = value
+    elif isinstance(value, Pattern):
+        param = Parameter.from_pattern(value)
+    elif isinstance(value, (SweepAxis, RepeatAxis)):
+        param = Parameter.from_axis(value)
+    elif isinstance(value, (int, float)):
+        # bare number — wrap as SI constant of this kind
+        unit = SI_DEFAULT_UNIT[kind]
         return Parameter.constant(
-            name=name,
+            name=name if name else f"_{field_name}_{next(_param_autoname)}",
             value=value,
             unit=unit,
+            kind=kind,
         )
     else:
-        return Parameter.constant(
-            name=f"_{field_name}_{next(_param_autoname)}",
-            value=value,
-            unit=unit,
+        raise TypeError(
+            f"{name or field_name or 'param'}: expected a number, Parameter, "
+            f"SweepAxis, RepeatAxis or Pattern, got {type(value).__name__}."
         )
+
+    expected = KIND_CANONICAL.get(kind)
+    if expected is not None and param.canonical_unit != expected:
+        raise ValueError(
+            f"{name or field_name or 'param'}: expected a {kind} value "
+            f"(canonical '{expected}'), got canonical "
+            f"'{param.canonical_unit}' from {param.name!r}. "
+            + ("For coarse (tProc-timed) quantities build the handle with "
+               "kind='coarse_time'." if expected == "treg" else "")
+        )
+    return param

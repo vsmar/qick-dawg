@@ -200,7 +200,7 @@ class CPMGXYFineRes(ReadoutHelpers, NVAveragerProgram):
         #   N % 8 in {0,1,4,7}  →  final π/2 along −Y (270°)
         #   N % 8 in {2,3,5,6}  →  final π/2 along +Y (90°)
         self.ending_half_pi_phase = 270 if self.cfg.n_cpmg % 8 in [0,1,4,7] else 90
-        
+
         self.pre_init()
         
 

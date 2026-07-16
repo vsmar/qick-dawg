@@ -38,37 +38,33 @@ pulses that share a segment id -- this is what keeps a sweep's post-reset
 segment (whose base times restart at 0) from being compared against, or
 fused with, pulses from a different segment.
 
+Swept pulse lengths
+-------------------
+Constant-amplitude coarse-mode pulses are counted out by the tProc in treg,
+so their length may be swept. A LinearSweepAxis length is affine (start +
+i*step, scaled to ftsamp) and is handled exactly like a swept delay: the
+pulse END and the cursor after it both carry the counter term. Inside a
+repeat() this makes the body duration swept, which the existing bilinear
+check rejects. Waveform (shaped) pulses remain constant-length.
+
 Rejected (non-affine) cases -- raised as ValueError
 ---------------------------------------------------
-  * exponential swept delay        (geometric accumulation) '
-    # NOTE: could unroll or modify exponential sweep to have a pseudo-affine form
-  * swept delay inside a repeat()   (bilinear body-duration * count)
+  * exponential swept delay OR pulse length  (geometric accumulation) # NOTE: could unroll or modify exponential sweep to have a pseudo-affine form
+  * swept delay / swept pulse length inside a repeat()  (bilinear)
   * Pattern as a delay duration     (patterns are phase-only anyway)
-
-Dependencies not yet wired up
------------------------------
-  * pulses.DefinePulse must expose length_ftsamp / waveform_mode /
-    preferred_resolution (port from the original pulseconstructor).
-  * SweepAxis.num_steps is still a TODO; only the decreasing-sweep branch of
-    AffineTime.min_value needs it, via an injected callback.
-  * Parameter exposes its canonical constant via _constant_value; a public
-    .value accessor would read more cleanly here.
 """
 
-# NOTE: Forcing cursor time at sweeps might not be good, 
-# really this forced gridding happens at readouts we dont need to loop over
-
-# Idea: build in slack for forcing regridding whenever a trigger / RO instruction occurs
-
+# NOTE: Forcing cursor time at sweeps might not be good, really this forced gridding happens at readouts we dont need to loop over
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from itertools import count
 
-from ir import DelayIR, PlayIR, RepeatBlock, Sequence, SweepBlock, TriggerIR
-from parameters import Parameter
-from sweep_axis import (
+from .ir import DelayIR, PlayIR, RepeatBlock, Sequence, SweepBlock, TriggerIR
+from .parameters import Parameter
+from .units import FTSAMP_PER_TREG
+from .sweep_axis import (
     ExponentialSweepAxis,
     LinearSweepAxis,
     RepeatAxis,
@@ -95,10 +91,10 @@ class AffineTime:
     # -- constructors / combinators -----------------------------------------
 
     @staticmethod
-    def const(n: int) -> AffineTime:
+    def const(n: int) -> "AffineTime":
         return AffineTime(base=int(n), _terms={})
 
-    def shifted(self, dt: int) -> AffineTime:
+    def shifted(self, dt: int) -> "AffineTime":
         return AffineTime(base=self.base + int(dt), _terms=dict(self._terms))
 
     def plus_counter(self, axis, coeff: int) -> "AffineTime":
@@ -114,14 +110,14 @@ class AffineTime:
             terms[key] = (prev_axis, new_coeff)
         return AffineTime(base=self.base, _terms=terms)
 
-    def scaled(self, k: int) -> AffineTime:
+    def scaled(self, k: int) -> "AffineTime":
         terms = {}
         for key, (axis, coeff) in self._terms.items():
             if coeff * k != 0:
                 terms[key] = (axis, coeff * k)
         return AffineTime(base=self.base * k, _terms=terms)
 
-    def __add__(self, other: AffineTime) -> AffineTime:
+    def __add__(self, other: "AffineTime") -> "AffineTime":
         terms = dict(self._terms)
         for key, (axis, coeff) in other._terms.items():
             prev_axis, prev_coeff = terms.get(key, (axis, 0))
@@ -132,7 +128,7 @@ class AffineTime:
                 terms[key] = (prev_axis, new_coeff)
         return AffineTime(base=self.base + other.base, _terms=terms)
 
-    def __sub__(self, other: "AffineTime") -> AffineTime:
+    def __sub__(self, other: "AffineTime") -> "AffineTime":
         return self + other.scaled(-1)
 
     # -- queries ------------------------------------------------------------
@@ -210,8 +206,42 @@ class TimedInstruction:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _pulse_length_ftsamp(pulse) -> int:
-    return int(getattr(pulse, "length_ftsamp", None))
+def _advance_by_pulse(start: AffineTime, pulse) -> AffineTime:
+    """End time of a pulse played at `start`, affine in any length counter.
+
+    * waveform mode          -- fixed shape length (constant).
+    * coarse mode, constant  -- length_coarse.value treg (constant).
+    * coarse mode, swept     -- the tProc counts the pulse out in treg, so a
+      LinearSweepAxis length is affine exactly like a swept delay:
+          end(i) = start + (axis.start + i*axis.step) * FTSAMP_PER_TREG
+      Both terms are xFTSAMP_PER_TREG, so treg-grid alignment is preserved
+      for every iteration. Exponential / pattern / repeat-driven lengths are
+      rejected (non-affine or non-durations), mirroring _advance_by_delay.
+    """
+    if pulse.waveform_mode:
+        return start.shifted(pulse.shape.length)
+
+    lp = pulse.length_coarse                      # coarse_time Parameter (treg)
+    if lp.is_constant:
+        return start.shifted(lp.value * FTSAMP_PER_TREG)
+
+    axis = lp.driving_axis
+
+    if isinstance(axis, LinearSweepAxis):
+        return (start.shifted(axis.start * FTSAMP_PER_TREG)
+                     .plus_counter(axis, axis.step * FTSAMP_PER_TREG))
+
+    if isinstance(axis, ExponentialSweepAxis):
+        raise ValueError(
+            f"Pulse '{pulse.name}' length driven by exponential axis "
+            f"'{axis.name}' produces geometric (non-affine) timing. "
+            f"Not supported without rollout."
+        )
+
+    raise ValueError(
+        f"Pulse '{pulse.name}' length must be a constant or a "
+        f"LinearSweepAxis (kind='coarse_time'); got {type(axis).__name__}."
+    )
 
 
 def _advance_by_delay(cursor: AffineTime, duration: Parameter) -> AffineTime:
@@ -276,7 +306,7 @@ def _schedule(nodes: list, seg_alloc) -> tuple[list[tuple[int, TimedInstruction]
         if isinstance(node, PlayIR):
             ch = node.channel
             start = cur(ch)
-            end = start.shifted(_pulse_length_ftsamp(node.pulse))
+            end = _advance_by_pulse(start, node.pulse)
 
             grid = node.pulse.preferred_resolution
             grid = 1 if grid == "auto" else grid
@@ -322,8 +352,25 @@ def _schedule(nodes: list, seg_alloc) -> tuple[list[tuple[int, TimedInstruction]
                 d = dur.base
                 if isinstance(bound, int):
                     cursor[ch] = entry.shifted(bound * d)
-                else:  # variable count N (a SweepAxis)
-                    cursor[ch] = entry.plus_counter(bound, d)
+                elif isinstance(bound, LinearSweepAxis):
+                    # bound's actual repeat count at iteration k is
+                    # (bound.start + k*bound.step) -- same convention as
+                    # _advance_by_delay's LinearSweepAxis branch. The cursor
+                    # advances d per repeat, so the affine term needs BOTH a
+                    # base offset (d*start) and a scaled coefficient
+                    # (d*step), not just a bare coefficient of d: a bare
+                    # plus_counter(bound, d) silently drops the d*start term
+                    # entirely (only invisible when start==0), and is only
+                    # coincidentally right on the coefficient when step==1.
+                    cursor[ch] = (entry.shifted(d * bound.start)
+                                       .plus_counter(bound, d * bound.step))
+                else:
+                    raise ValueError(
+                        f"repeat('{node.axis.name}') bound '{bound.name}' is "
+                        f"a {type(bound).__name__}; only a fixed int or a "
+                        f"LinearSweepAxis produces an affine repeat-count "
+                        f"cursor advance (geometric bounds are non-affine)."
+                    )
 
             seg = next(seg_alloc)   # continuation after the block is a new run
 

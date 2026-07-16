@@ -48,10 +48,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from itertools import count
 
-from parameters import Parameter, coerce_param
-from pulses import DefinePulse
-from sweep_axis import Pattern, RepeatAxis, SweepAxis
-from units import SI_DEFAULT_UNIT
+from .parameters import Parameter, coerce_param
+from .pulses import DefinePulse
+from .sweep_axis import Pattern, RepeatAxis, SweepAxis
+from .units import SI_DEFAULT_UNIT
 
 # ---------------------------------------------------------------------------
 # IR instruction types
