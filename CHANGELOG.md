@@ -1,9 +1,41 @@
+## [1.2.2](https://github.com/sandialabs/qick-dawg/compare/v1.3.1...v1.2.2) (2026-06-02)
+
+
+### Reverts
+
+* Revert "Reapply "fix: fixed bugs realted to laseron/off and softavg still being required (#64) [skip ci]"" ([4b1a1bf](https://github.com/sandialabs/qick-dawg/commit/4b1a1bf85e5544f468d2987da0700c5e52e38114)), closes [#64](https://github.com/sandialabs/qick-dawg/issues/64)
+* Revert "Reapply "fix: fixed bugs realted to laseron/off and softavg still being required (#64) [skip ci]"" ([1365275](https://github.com/sandialabs/qick-dawg/commit/1365275bf9e05e8dfe84009b76fe365c5e0fa8a3)), closes [#64](https://github.com/sandialabs/qick-dawg/issues/64)
+* Revert "fix: fixed bugs realted to laseron/off and softavg still being required (#64) [skip ci]" ([07b49a6](https://github.com/sandialabs/qick-dawg/commit/07b49a69ccd49818d188575b29848fac119842bf)), closes [#64](https://github.com/sandialabs/qick-dawg/issues/64)
+* reverting to 2.302 compatibility, few bug fixes ([5bd6708](https://github.com/sandialabs/qick-dawg/commit/5bd6708c27633a9459542ea636632face15deb7a))
+
+
+
+## [1.3.1](https://github.com/sandialabs/qick-dawg/compare/v1.3.0...v1.3.1) (2026-06-01)
+
+
+### Bug Fixes
+
+* fixed bugs realted to laseron/off and softavg still being required ([5f9f394](https://github.com/sandialabs/qick-dawg/commit/5f9f39483025c5ea85c897ff62670ccd3dd036c9))
+* fixed bugs realted to laseron/off and softavg still being required ([#64](https://github.com/sandialabs/qick-dawg/issues/64)) [skip ci] ([7380e0d](https://github.com/sandialabs/qick-dawg/commit/7380e0d2eadd2e178f1d1f01d2afa26a20c733be))
+
+
+
+# [1.3.0](https://github.com/sandialabs/qick-dawg/compare/v1.2.1...v1.3.0) (2026-05-30)
+
+
+### Features
+
+* Latest DAWG house build files for 4x2, ZCU111 and ZCU216. ([bfe67b4](https://github.com/sandialabs/qick-dawg/commit/bfe67b4e9a750a4b2e12f3220f2754a101a9faa0))
+
+
+
 ## [1.2.1](https://github.com/sandialabs/qick-dawg/compare/v1.2.0...v1.2.1) (2025-01-29)
 
 
 ### Bug Fixes
 
 * fixed installation to remove qd install and paths ([033c254](https://github.com/sandialabs/qick-dawg/commit/033c254772d211be45b8f4bffe012e33bde48643))
+* fixed installation to remove qd install and paths ([#53](https://github.com/sandialabs/qick-dawg/issues/53)) [skip ci] ([f405d28](https://github.com/sandialabs/qick-dawg/commit/f405d28dfd9857fbbaeb1ac119cf4a48b840d733))
 
 
 

@@ -32,7 +32,7 @@ def laser_on(config, reps=1, readout_integration_treg=1020):
     data = prog.acquire()
 
     if prog.cfg.edge_counting:
-        return int(data)
+        return int(np.sum(data))
     else:
         data = np.mean(data)
         data /= readout_integration_treg

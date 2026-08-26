@@ -15,18 +15,16 @@ In this package we supply specific mw, laser, and readout pulsing code to charac
 
 ## Hardware
 
-- Either [RFSoC4x2](https://www.xilinx.com/support/university/xup-boards/RFSoC4x2.html)  or [ZCU111](https://www.xilinx.com/products/boards-and-kits/zcu111.html)
-- Control Computer 
-- Low Frequency Differential Amplifier such as  [Texas Instruments LMH5401EVM](https://www.digikey.com/en/products/detail/texas-instruments/LMH5401EVM/5031896?s=N4IgTCBcDaIDIFkASBWALABgIwFEBqCIAugL5A)
-- 3 Voltage supplies to power the differential amplifier
+- [RFSoC4x2](https://www.xilinx.com/support/university/xup-boards/RFSoC4x2.html),   [ZCU111](https://www.xilinx.com/products/boards-and-kits/zcu111.html) and now supporting the [ZCU216](https://www.amd.com/en/products/adaptive-socs-and-fpgas/evaluation-boards/zcu216.html)
+- Control Computer
 - Router (required if using LAN connection) [(example)](https://www.amazon.com/TP-Link-Integrated-Lightening-Protection-TL-R605/dp/B08QTXNWZ1/ref=asc_df_B08QTXNWZ1/?tag=hyprod-20&linkCode=df0&hvadid=475692076734&hvpos=&hvnetw=g&hvrand=3761702075041011209&hvpone=&hvptwo=&hvqmt=&hvdev=c&hvdvcmdl=&hvlocint=&hvlocphy=1022494&hvtargid=pla-1149738264234&psc=1) and ethernet cords
 
 ## Installation
 To install QICKDAWG software follow the README found [here](./installation/Readme.md). Software installation includes:
-- necessary hardware modifications to the RFSoC4x2
+- necessary hardware for the RFSoC4x2, ZCU111 and ZCU216
 - cloning QICK-DAWG
-- installing necessary packages for the control computer/RFSoC4x2
-- connecting to the RFSoC4x2 
+- installing necessary packages for the control computer/FPGA
+- connecting to the FPGA
 
 ## Usage
 QICKDAWG has programs for the characterization of:
@@ -38,7 +36,7 @@ QICKDAWG has programs for the characterization of:
 - T<sub>1</sub> Relaxation
 - Ramsey Interferometry 
 
-using a ZCU111 or RFSoC4x2. Support for the ZCU216 coming soon. 
+using a ZCU111, RFSoC4x2 and now the ZCU216!
 
 <!-- ### Example use: ###
 

@@ -204,7 +204,7 @@ class NVAveragerProgram(QickRegisterManagerMixin, AcquireProgram):
         if readouts_per_experiment is not None:
             self.set_reads_per_shot(readouts_per_experiment)
 
-        self.config_all(qd.soc, load_pulses=load_pulses, load_mem=False)
+        self.config_all(qd.soc, load_mem=False)
 
         if any([x is None for x in [self.counter_addr, self.loop_dims, self.avg_level]]):
             raise RuntimeError("data dimensions need to be defined with setup_acquire() before calling acquire()")
